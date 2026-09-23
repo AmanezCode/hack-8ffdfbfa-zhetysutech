@@ -96,6 +96,43 @@ class TeamMLTests(unittest.TestCase):
             self.assertFalse(again["recomputed"])
             self.assertEqual(len(list(Path(directory).glob("*.json"))), 2)
 
+    def test_retrained_model_triggers_recompute_and_interval_is_published(self):
+        import shutil
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts"
+            shutil.copytree(ARTIFACTS, artifacts)
+            cfg = TURBINES[1]
+            agent = ForecastAgent(output_dir=root / "out", artifacts_dir=artifacts, coordinates={1: (cfg["lat"], cfg["lon"])})
+            agent.run(1, ISSUE)
+            payload = json.loads(agent.last_saved_path.read_text(encoding="utf-8"))
+            band = payload["analysis"]["interval_80"]
+            prediction = np.array([row["prediction"] for row in payload["forecast"]])
+            self.assertTrue((np.array(band["low"]) <= prediction + 1e-9).all() and (prediction <= np.array(band["high"]) + 1e-9).all())
+            self.assertGreater(band["cv_coverage"], 0.75)
+            self.assertFalse(agent.check_for_update(1, ISSUE)["recomputed"])
+
+            manifest_path = artifacts / "manifest_t1.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["model_version"] = "t1-direct-retrained"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            decision = agent.check_for_update(1, ISSUE)
+            self.assertTrue(decision["model_changed"])
+            self.assertTrue(decision["recomputed"])
+
+    def test_model_version_reflects_artifact_contents(self):
+        manifest = json.loads((ARTIFACTS / "manifest_t1.json").read_text(encoding="utf-8"))
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("train_module", ARTIFACTS.parent / "train.py")
+        train_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(train_module)
+        artifacts = model.load_artifacts(1)
+        artifacts["interval_scale"] = artifacts.get("interval_scale", 1.0)
+        expected = f"t1-{artifacts['variant']}-{train_module.content_hash(artifacts, manifest['weather']['sha256'])}"
+        self.assertEqual(manifest["model_version"], expected)
+        artifacts["blend_weight"] += 0.01
+        self.assertNotEqual(train_module.content_hash(artifacts, manifest["weather"]["sha256"]), expected.split("-")[-1])
+
     def test_cli_runs_team_pipeline_and_writes_json(self):
         import subprocess
         import sys

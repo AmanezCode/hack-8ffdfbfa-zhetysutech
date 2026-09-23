@@ -1,10 +1,7 @@
 """Adapt aware UTC agent inputs to the team's naive UTC Previous Runs API."""
 import functools
-import json
 from pathlib import Path
 
-import joblib
-import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
@@ -51,7 +48,9 @@ def load_team_weather(lat: float, lon: float, issue_time: pd.Timestamp, *, refre
     missing = snapshot.index[snapshot[["wind_fc", "temp_fc"]].isna().any(axis=1)]
     if len(missing):
         raise model.IncompleteWeatherError(missing)
-    frame = snapshot.rename(columns={"temp_fc": "temperature"}).reset_index()
+    # The agent validates only the core series; extras may legitimately be NaN and
+    # reach the model through the archive attached below.
+    frame = snapshot[["run_day", "wind_fc", "temp_fc"]].rename(columns={"temp_fc": "temperature"}).reset_index()
     frame["time"] = pd.to_datetime(frame["time"]).dt.tz_localize("UTC")
     provenance = weather_provenance(turbine_id)
     frame.attrs.update(source="Open-Meteo Previous Runs", provenance=provenance,
@@ -76,19 +75,15 @@ def model_card(manifest: dict) -> dict:
         "cv_mae": manifest["cv_mean"][chosen]["MAE"],
         "expected_abs_error_by_lead": manifest.get("expected_abs_error_by_lead"),
         "deviation_q99": manifest.get("deviation_q99"),
+        "cv_within_10pct": manifest["cv_mean"][chosen].get("within_10pct"),
+        "interval_cv_coverage": (manifest.get("interval") or {}).get("cv_coverage"),
     }
 
 
 def run_team_model(turbine_id: int, issue_time: pd.Timestamp, weather: pd.DataFrame,
                    artifacts_dir: str | Path = ARTIFACTS, *, history: pd.DataFrame | None = None):
     directory = Path(artifacts_dir)
-    if directory.resolve() == ARTIFACTS.resolve():
-        artifacts = model.load_artifacts(turbine_id)
-    else:
-        artifacts = joblib.load(directory / f"model_t{turbine_id}.joblib")
-        booster_path = directory / f"booster_t{turbine_id}.txt"
-        artifacts["booster"] = lgb.Booster(model_str=booster_path.read_text(encoding="utf-8")) if booster_path.exists() else None
-        artifacts["manifest"] = json.loads((directory / f"manifest_t{turbine_id}.json").read_text(encoding="utf-8"))
+    artifacts = model.load_artifacts(turbine_id, None if directory.resolve() == ARTIFACTS.resolve() else directory)
     manifest = artifacts["manifest"]
     if manifest["feature_schema"] != FEATURE_COLUMNS or manifest["variant"] != artifacts["variant"]:
         raise ValueError("Model manifest does not match current feature/variant contract")

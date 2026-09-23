@@ -34,6 +34,9 @@ LOG = logging.getLogger(__name__)
 RAMP_THRESHOLD = 0.3
 RAMP_WINDOW_HOURS = 3
 ZERO_WIND_POWER = 0.05
+# The product is a 24-48 h forecast: once the published one covers less than a
+# day ahead it has expired and must be re-issued even if no input changed.
+MIN_COVERAGE_HOURS = 24
 TRANSIENT_ERRORS = (TimeoutError, ConnectionError, RequestsTimeout, RequestsConnectionError)
 
 
@@ -70,6 +73,7 @@ class ForecastAgent:
         self.model_runner = model_runner
         self.last_saved_path: Path | None = None
         self._model_metadata: dict = {}
+        self._interval: dict | None = None
 
     # ---------------------------------------------------------------- tools
 
@@ -221,8 +225,15 @@ class ForecastAgent:
         if revision:
             summary += f"; revised {revision['mean_abs_change']:.1%} on average vs previous forecast"
 
+        interval = pred.attrs.get("interval")
+        coverage = card.get("interval_cv_coverage")
+        if interval:
+            width = np.asarray(interval["high"]) - np.asarray(interval["low"])
+            summary += f"; 80% interval width {width.mean():.0%}"
+
         return {"summary": summary, "days": days, "ramps": ramps, "flags": flags, "revision": revision,
                 "expected_abs_error": band.round(4).tolist() if band is not None else None,
+                "interval_80": {**interval, "cv_coverage": coverage} if interval else None,
                 "cv_accuracy": card.get("cv_accuracy")}
 
     def save_forecast(self, turbine_id: int, issue_time: str | pd.Timestamp, pred: pd.DataFrame) -> Path:
@@ -300,7 +311,8 @@ class ForecastAgent:
         previous = self.latest_published(turbine_id, check)
         weather = self._weather(turbine_id, check, refresh=refresh_weather)
         decision = {"check_time": check.isoformat(), "previous_run_id": previous["run_id"] if previous else None,
-                    "overlap_hours": 0, "changed_hours": 0, "fresher_runs": {}, "model_changed": False, "recomputed": False}
+                    "overlap_hours": 0, "changed_hours": 0, "fresher_runs": {}, "model_changed": False,
+                    "remaining_coverage_hours": 0, "expired": False, "recomputed": False}
 
         if previous is None:
             LOG.info("[AGENT] no published forecast covers %s -> forecasting", check)
@@ -326,13 +338,21 @@ class ForecastAgent:
 
         current_version = self._current_model_version(turbine_id)
         decision["model_changed"] = bool(current_version and current_version != previous.get("model", {}).get("model_version"))
+        covered_until = _utc([row["time"] for row in previous["forecast"]]).max()
+        decision["remaining_coverage_hours"] = max(int((covered_until - check) / pd.Timedelta(hours=1)), 0)
+        decision["expired"] = decision["remaining_coverage_hours"] < MIN_COVERAGE_HOURS
 
-        if not len(changed) and not decision["model_changed"]:
+        if not len(changed) and not decision["model_changed"] and not decision["expired"]:
             LOG.info("[AGENT] inputs for %d overlapping hours unchanged -> keeping published forecast %s",
                      decision["overlap_hours"], previous["run_id"][:8])
             return decision
 
-        reason = "model updated" if decision["model_changed"] else f"fresher weather for {len(changed)} of {decision['overlap_hours']} hours {decision['fresher_runs']}"
+        if decision["model_changed"]:
+            reason = "model updated"
+        elif decision["expired"]:
+            reason = f"published forecast covers only {decision['remaining_coverage_hours']} h ahead (< {MIN_COVERAGE_HOURS} h)"
+        else:
+            reason = f"fresher weather for {len(changed)} of {decision['overlap_hours']} hours {decision['fresher_runs']}"
         LOG.info("[AGENT] %s -> recomputing", reason)
         result = self._forecast_from(turbine_id, check, weather, "input_update")
         return decision | {"recomputed": True, "run_id": self._run_id(), "analysis": result.attrs["agent"]["analysis"]}
@@ -378,12 +398,15 @@ class ForecastAgent:
 
     def _predict(self, turbine_id: int, issue_time: pd.Timestamp, weather: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         self._model_metadata = {}
+        self._interval = None
         if self.model_runner is not None:
             outputs = self.model_runner(turbine_id, issue_time, weather.copy(deep=True))
         else:
             from .ml_bridge import run_team_model
             team_result = run_team_model(turbine_id, issue_time, weather.copy(deep=True), self.artifacts_dir)
             self._model_metadata = team_result.attrs["model"]
+            if {"p10", "p90"} <= set(team_result.columns):
+                self._interval = {"low": team_result["p10"].round(4).tolist(), "high": team_result["p90"].round(4).tolist()}
             outputs = tuple(team_result[name].to_numpy() for name in ("level1", "residual_pred", "prediction"))
         if len(outputs) != 3:
             raise ValueError("Model must return level1, residual_pred, prediction")
@@ -405,6 +428,8 @@ class ForecastAgent:
         result = result[COLUMNS]
         result.attrs = {"weather": {k: v for k, v in weather.attrs.items() if not k.startswith("_")},
                         "model": dict(self._model_metadata)}
+        if self._interval:
+            result.attrs["interval"] = self._interval
 
         previous = self.latest_published(turbine_id, stamp)
         analysis = self.analyze_forecast(result, weather, previous)

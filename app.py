@@ -14,8 +14,9 @@ import streamlit as st
 
 from src.config import ARTIFACTS, FORECASTS, ISSUE_HOUR_UTC, SCADA_UTC_OFFSET_HOURS, TEST_END, TEST_START, TURBINES
 from src.forecast_agent import ForecastAgent
+from src.llm_agent import OperatorAgent
 
-AGENT_LOGGER = logging.getLogger("src.forecast_agent")
+LOGGERS = [logging.getLogger("src.forecast_agent"), logging.getLogger("src.llm_agent")]
 
 # Reference data-viz palette: categorical slots in fixed order, one-hue sequential ramp.
 PALETTE = {
@@ -30,6 +31,14 @@ MODEL_NAMES = {
     "direct": "LightGBM (прямой)",
     "climatology": "Климатология (среднее по часу)",
     "persistence": "Персистентность*",
+}
+
+LLM_LABELS = {
+    "auto": "LLM: автовыбор по ключу",
+    "openai": "OpenAI (GPT)",
+    "claude": "Claude",
+    "template": "Без LLM (шаблон)",
+    "off": "Не готовить",
 }
 
 FLAG_TEXT = {
@@ -109,23 +118,32 @@ def render_quality(turbine_id: int) -> None:
     by_lead = {label: np.mean([f["mae_by_lead"][label][chosen] for f in folds]) for label in ("1-24h", "25-48h")}
     efficiency = load_efficiency().get(str(turbine_id), {})
 
+    gain = manifest.get("update_gain", {}).get("+18h", {}).get("improvement")
+    interval = manifest.get("interval") or {}
+
     st.subheader("Качество модели")
     cols = st.columns(5)
     cols[0].metric("Точность (1 − nMAE)", f"{cv[chosen]['accuracy']:.1%}",
                    help="Средняя абсолютная ошибка как доля номинальной мощности, вычтенная из 100%. "
                         "Скользящая проверка: ноябрь 2025 — январь 2026, официальные выпуски 23:00.")
-    cols[1].metric("Лучше климатологии", f"{1 - cv[chosen]['MAE'] / cv['climatology']['MAE']:.0%}",
+    cols[1].metric("Часов в пределах ±10%", f"{cv[chosen]['within_10pct']:.0%}",
+                   help="Доля часов, где прогноз отличается от факта не больше чем на 10% номинала.")
+    cols[2].metric("Лучше климатологии", f"{1 - cv[chosen]['MAE'] / cv['climatology']['MAE']:.0%}",
                    help="Снижение MAE относительно среднего профиля мощности по часу суток.")
-    cols[2].metric("Лучше кривой мощности", f"{1 - cv[chosen]['MAE'] / cv['physics']['MAE']:.1%}")
-    cols[3].metric("Ошибка суточной энергии", f"{cv[chosen]['daily_energy_error']:.1%}",
-                   help="Ошибка суммарной выработки за сутки, доля от номинала × 24 ч.")
+    if gain is not None:
+        cols[3].metric("Пересчёт через 18 ч", f"−{gain:.1%}",
+                       help="Насколько меньше ошибка (MAE) прогноза на те же часы, если агент пересчитал его "
+                            "с более свежей погодой.")
     if efficiency:
         cols[4].metric("Прогноз на 48 ч", f"{efficiency['agent_cycle_ms_per_forecast']:.0f} мс",
                        help=f"Полный цикл агента; инференс модели {efficiency['inference_ms_per_48h_forecast']:.0f} мс, "
                             f"обучение {efficiency['train_seconds']:.0f} с.")
 
-    st.caption(f"Горизонт 1–24 ч: nMAE {by_lead['1-24h']:.1%} · горизонт 25–48 ч: nMAE {by_lead['25-48h']:.1%} · "
-               f"выбранная модель: {MODEL_NAMES[chosen]} · версия {manifest['model_version']}")
+    st.caption(f"Горизонт 1–24 ч: nMAE {by_lead['1-24h']:.1%} · 25–48 ч: nMAE {by_lead['25-48h']:.1%} · "
+               f"лучше кривой мощности на {1 - cv[chosen]['MAE'] / cv['physics']['MAE']:.1%} · "
+               f"ошибка суточной энергии {cv[chosen]['daily_energy_error']:.1%}"
+               + (f" · 80%-ный интервал покрыл {interval['cv_coverage']:.0%} фактов" if interval.get("cv_coverage") else "")
+               + f" · {MODEL_NAMES[chosen]}, версия {manifest['model_version']}")
 
     with st.expander("Сравнение моделей и baseline"):
         table = pd.DataFrame([
@@ -144,13 +162,17 @@ def forecast_figure(frame: pd.DataFrame, analysis: dict, title: str) -> go.Figur
     x = to_scada(frame["time"])
     power = 100 * frame["prediction"].to_numpy()
     fig = go.Figure()
+    interval = analysis.get("interval_80")
     band = analysis.get("expected_abs_error")
-    if band:
+    if interval:
+        low, high, label = 100 * np.asarray(interval["low"]), 100 * np.asarray(interval["high"]), "80%-ный интервал"
+    elif band:
         error = 100 * np.asarray(band)
-        fig.add_trace(go.Scatter(x=x, y=np.clip(power + error, 0, 100), line=dict(width=0), showlegend=False,
-                                 hoverinfo="skip"))
-        fig.add_trace(go.Scatter(x=x, y=np.clip(power - error, 0, 100), line=dict(width=0), fill="tonexty",
-                                 fillcolor="rgba(57,135,229,0.18)", name="Ожидаемая ошибка (CV)", hoverinfo="skip"))
+        low, high, label = np.clip(power - error, 0, 100), np.clip(power + error, 0, 100), "Ожидаемая ошибка (CV)"
+    if interval or band:
+        fig.add_trace(go.Scatter(x=x, y=high, line=dict(width=0), showlegend=False, hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=x, y=low, line=dict(width=0), fill="tonexty", fillcolor="rgba(57,135,229,0.18)",
+                                 name=label, hoverinfo="skip"))
     fig.add_trace(go.Scatter(x=x, y=100 * frame["level1"], name="Кривая мощности", mode="lines",
                              line=dict(color=c["muted"], width=2, dash="dot"),
                              hovertemplate="%{y:.0f}%<extra>кривая</extra>"))
@@ -190,6 +212,19 @@ def render_analysis(analysis: dict) -> None:
                    f"в {revision['max_change_scada'][-11:]}.")
     for flag in analysis["flags"]:
         st.info(FLAG_TEXT[flag["code"]](flag), icon="ℹ️")
+
+
+def render_briefing(briefing) -> None:
+    st.subheader("Брифинг диспетчеру")
+    if briefing.provider == "template":
+        source = "шаблон без LLM" + (f" — {briefing.note}" if briefing.note else " (ключ LLM не задан)")
+    else:
+        source = f"{'OpenAI' if briefing.provider == 'openai' else 'Claude'} · {briefing.model}"
+    tools = ", ".join(t["tool"] for t in briefing.trace)
+    st.caption(f"Написал: {source} · вызвано инструментов агента: {len(briefing.trace)} ({tools}). "
+               "Все числа взяты из результатов инструментов.")
+    with st.container(border=True):
+        st.markdown(briefing.text)
 
 
 def render_updates(decisions: list[dict]) -> None:
@@ -238,7 +273,7 @@ st.caption("Почасовой прогноз выработки ВЭС на 24�
 with st.sidebar:
     st.header("Параметры")
     turbine_id = st.selectbox("Турбина", options=list(TURBINES), format_func=lambda t: f"Турбина {t}")
-    mode = st.radio("Режим", ["Один выпуск", "Весь февраль"])
+    mode = st.radio("Режим", ["Один выпуск", "Весь февраль", "Сейчас (live)"])
     forecast_date = None
     with_updates = live = False
     if mode == "Один выпуск":
@@ -247,14 +282,23 @@ with st.sidebar:
         with_updates = st.toggle("Пересчёт при свежей погоде (каждые 6 ч)", value=True,
                                  help="Агент проверяет, стали ли доступны более свежие запуски погодной модели, "
                                       "и пересчитывает прогноз, только если входные данные изменились.")
-    live = st.toggle("Живой запрос к Open-Meteo", value=False,
-                     help="Кроме закреплённого архива, агент запрашивает погоду по координатам турбины через API.")
+    if mode == "Сейчас (live)":
+        live = True
+        st.caption("Прогноз от текущего часа по свежей погоде Open-Meteo.")
+    else:
+        live = st.toggle("Живой запрос к Open-Meteo", value=False,
+                         help="Кроме закреплённого архива, агент запрашивает погоду по координатам турбины через API.")
+    llm = "template"
+    if mode != "Весь февраль":
+        llm = st.selectbox("Брифинг диспетчеру", options=list(LLM_LABELS), format_func=LLM_LABELS.get,
+                           help="LLM сама вызывает инструменты агента и пишет брифинг; ключ берётся из "
+                                "OPENAI_API_KEY / ANTHROPIC_API_KEY. Без ключа — шаблон на тех же инструментах.")
     run_clicked = st.button("Запустить агента", type="primary", width="stretch")
 
 render_quality(turbine_id)
 st.divider()
 
-request_key = (turbine_id, mode, forecast_date, with_updates, live)
+request_key = (turbine_id, mode, forecast_date, with_updates, live, llm)
 if run_clicked:
     lines: list[str] = []
     panel = st.empty()
@@ -264,17 +308,23 @@ if run_clicked:
         panel.code("\n".join(lines[-40:]), language="text")
 
     handler = UILog(log)
-    old_level, old_propagate = AGENT_LOGGER.level, AGENT_LOGGER.propagate
-    AGENT_LOGGER.setLevel(logging.INFO)
-    AGENT_LOGGER.propagate = False
-    AGENT_LOGGER.addHandler(handler)
+    saved = [(logger, logger.level, logger.propagate) for logger in LOGGERS]
+    for logger in LOGGERS:
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        logger.addHandler(handler)
     cfg = {t: (c["lat"], c["lon"]) for t, c in TURBINES.items()}
     agent = ForecastAgent(output_dir=session_output_dir(), coordinates=cfg)
     state = {"key": request_key}
     try:
         with st.spinner("Агент работает…"):
-            if mode == "Один выпуск":
+            if mode == "Сейчас (live)":
+                issue = pd.Timestamp.now(tz="UTC").floor("h")
+                result = agent.run(turbine_id, issue, refresh_weather=True)
+                state["result"], state["analysis"], state["issue"] = result, result.attrs["agent"]["analysis"], issue
+            elif mode == "Один выпуск":
                 issue = issue_time_for(forecast_date)
+                state["issue"] = issue
                 if with_updates:
                     decisions = agent.run_update_cycle(turbine_id, issue, refresh_weather=live)
                     state["decisions"] = decisions
@@ -298,15 +348,21 @@ if run_clicked:
                                  "Часы полной мощности": first_day["full_load_hours"], "Пик, %": 100 * first_day["peak_power"],
                                  "Ожидаемая ошибка, %": 100 * (first_day["expected_mae"] or np.nan)})
                 state["february"], state["days"] = pd.concat(frames, ignore_index=True), pd.DataFrame(days)
+        if mode != "Весь февраль" and llm != "off":
+            with st.spinner("LLM-агент готовит брифинг (вызывает инструменты)…"):
+                operator_agent = ForecastAgent(output_dir=session_output_dir() / "briefing", coordinates=cfg)
+                checks = (6, 12) if mode == "Один выпуск" else ()
+                state["briefing"] = OperatorAgent(operator_agent, llm).brief(turbine_id, state["issue"], checks=checks)
         st.session_state["run"] = state
     except Exception as exc:  # shown to the operator, logged in the agent log above
         st.session_state["run"] = None
         st.error(f"Прогноз не построен: {exc}")
     finally:
         st.session_state["log"] = lines
-        AGENT_LOGGER.removeHandler(handler)
-        AGENT_LOGGER.setLevel(old_level)
-        AGENT_LOGGER.propagate = old_propagate
+        for logger, level, propagate in saved:
+            logger.removeHandler(handler)
+            logger.setLevel(level)
+            logger.propagate = propagate
 
 state = st.session_state.get("run")
 if st.session_state.get("log") and not run_clicked:
@@ -314,10 +370,14 @@ if st.session_state.get("log") and not run_clicked:
         st.code("\n".join(st.session_state["log"]), language="text")
 
 if state and state["key"] == request_key:
-    if mode == "Один выпуск":
-        issue = issue_time_for(forecast_date)
-        st.subheader(f"Турбина {turbine_id} · прогноз, выпущенный {issue.tz_localize(None) + pd.Timedelta(hours=SCADA_UTC_OFFSET_HOURS):%d.%m %H:%M}")
-        st.plotly_chart(forecast_figure(state["result"], state["analysis"], "Плановый выпуск: 48 часов"), width="stretch")
+    if mode in ("Один выпуск", "Сейчас (live)"):
+        issue = state["issue"]
+        issued = issue.tz_convert("UTC").tz_localize(None) + pd.Timedelta(hours=SCADA_UTC_OFFSET_HOURS)
+        title = "Прогноз в реальном времени: 48 часов" if mode == "Сейчас (live)" else "Плановый выпуск: 48 часов"
+        st.subheader(f"Турбина {turbine_id} · прогноз, выпущенный {issued:%d.%m.%Y %H:%M}")
+        st.plotly_chart(forecast_figure(state["result"], state["analysis"], title), width="stretch")
+        if state.get("briefing"):
+            render_briefing(state["briefing"])
         render_analysis(state["analysis"])
         if state.get("decisions"):
             st.subheader("Повторный расчёт при обновлении входных данных")

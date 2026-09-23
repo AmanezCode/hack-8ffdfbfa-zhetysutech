@@ -47,6 +47,15 @@ def main() -> None:
         february = forecast["time_utc"].between(pd.Timestamp("2026-01-31 18:00"), pd.Timestamp("2026-02-28 17:00"))
         check(forecast.loc[february, "time_utc"].nunique() == 28 * 24, "all 672 February hours covered")
 
+        flat = pd.read_csv(FORECASTS / f"submission_turbine{turbine_id}.csv", parse_dates=["time_scada", "issue_time_scada"])
+        expected_hours = pd.date_range("2026-02-01", periods=28 * 24, freq="1h")
+        day_before = flat["time_scada"].dt.normalize() - pd.Timedelta(days=1) + pd.Timedelta(hours=23)
+        check(len(flat) == 672 and pd.DatetimeIndex(flat["time_scada"]).equals(expected_hours)
+              and (flat["issue_time_scada"] == day_before).all(),
+              "submission: 672 hours, each from the 23:00 issue of the previous day")
+        check(((flat["p10"] <= flat["prediction"] + 1e-12) & (flat["prediction"] <= flat["p90"] + 1e-12)).all(),
+              "submission interval brackets the forecast")
+
         history = load_turbine_hourly(turbine_id)
         weather = load_weather(turbine_id)
         artifacts = load_artifacts(turbine_id)

@@ -59,6 +59,10 @@ def main() -> None:
             "bias": round(cv[chosen]["bias"], 4),
             "WAPE": round(cv[chosen]["WAPE"], 4),
             "daily_energy_error_share_of_capacity": round(cv[chosen]["daily_energy_error"], 4),
+            "within_10pct_of_capacity": round(cv[chosen]["within_10pct"], 4),
+            "interval_80_cv_coverage": round(manifest["interval"]["cv_coverage"], 4),
+            "interval_80_mean_width": round(manifest["interval"]["cv_mean_width"], 4),
+            "reissue_gain": {k: round(v["improvement"], 4) for k, v in manifest["update_gain"].items()},
             "nMAE_by_horizon": {k: round(v, 4) for k, v in by_lead.items()},
             "skill_vs": {name: round(1 - cv[chosen]["MAE"] / cv[ref]["MAE"], 4) for ref, name in REFERENCES.items()},
             "train_seconds": manifest["train_seconds"],
@@ -72,7 +76,10 @@ def main() -> None:
         print(f"turbine {turbine_id} ({r['model']})")
         print(f"  accuracy (1 - nMAE)        {r['accuracy_1_minus_nMAE']:.1%}   nMAE {r['nMAE']:.1%}  nRMSE {r['nRMSE']:.1%}  bias {r['bias']:+.1%}")
         print(f"  by horizon                 1-24 h nMAE {r['nMAE_by_horizon']['1-24h']:.1%}, 25-48 h nMAE {r['nMAE_by_horizon']['25-48h']:.1%}")
+        print(f"  within 10% of capacity     {r['within_10pct_of_capacity']:.1%} of hours")
         print(f"  daily energy error         {r['daily_energy_error_share_of_capacity']:.1%} of daily capacity;  WAPE {r['WAPE']:.1%}")
+        print(f"  80% interval               CV coverage {r['interval_80_cv_coverage']:.1%}, mean width {r['interval_80_mean_width']:.1%}")
+        print("  re-issue with fresher data " + ", ".join(f"{k} -{v:.1%} MAE" for k, v in r["reissue_gain"].items()))
         print("  skill (MAE reduction) vs   " + ", ".join(f"{k} {v:.1%}" for k, v in r["skill_vs"].items()))
         print(f"  efficiency                 train {r['train_seconds']:.0f} s on {r['train_rows']} rows, model {r['model_size_kb']} KB, "
               f"inference {r['inference_ms_per_48h_forecast']:.0f} ms, full agent cycle {r['agent_cycle_ms_per_forecast']:.0f} ms per 48 h forecast")

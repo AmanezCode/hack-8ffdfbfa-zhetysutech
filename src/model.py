@@ -53,18 +53,47 @@ def fit_power_curve(table: pd.DataFrame) -> PowerCurve:
     return PowerCurve().fit(table["wind_corrected"], table["actual"])
 
 
-def fit_gbm(train: pd.DataFrame, label: np.ndarray, valid=None, valid_label=None, num_round: int = 2000) -> lgb.Booster:
+def fit_gbm(train: pd.DataFrame, label: np.ndarray, valid=None, valid_label=None, num_round: int = 2000,
+            params: dict | None = None) -> lgb.Booster:
+    params = LGB_PARAMS | (params or {})
     dataset = lgb.Dataset(train[FEATURE_COLUMNS], label=label)
     if valid is None:
-        return lgb.train(LGB_PARAMS, dataset, num_boost_round=num_round)
+        return lgb.train(params, dataset, num_boost_round=num_round)
     valid_set = lgb.Dataset(valid[FEATURE_COLUMNS], label=valid_label, reference=dataset)
     return lgb.train(
-        LGB_PARAMS,
+        params,
         dataset,
         num_boost_round=num_round,
         valid_sets=[valid_set],
         callbacks=[lgb.early_stopping(50, verbose=False)],
     )
+
+
+QUANTILES = {"q10": 0.1, "q90": 0.9}
+INTERVAL_COVERAGE = QUANTILES["q90"] - QUANTILES["q10"]
+
+
+def quantile_params(alpha: float) -> dict:
+    return {"objective": "quantile", "alpha": alpha, "metric": "quantile"}
+
+
+def interval(prediction: np.ndarray, q_low: np.ndarray, q_high: np.ndarray, scale: float) -> tuple[np.ndarray, np.ndarray]:
+    """80 % interval around the point forecast from quantile-model distances, widened by `scale`.
+
+    The scale is chosen on held-out data so the interval really covers 80 %
+    (split-conformal calibration); the raw quantile models alone under-cover.
+    """
+    low = prediction - scale * np.maximum(prediction - q_low, 0.0)
+    high = prediction + scale * np.maximum(q_high - prediction, 0.0)
+    return np.clip(low, 0.0, 1.0), np.clip(high, 0.0, 1.0)
+
+
+def fit_interval_scale(prediction: np.ndarray, q_low: np.ndarray, q_high: np.ndarray, actual: np.ndarray) -> float:
+    for scale in np.arange(0.5, 4.01, 0.05):
+        low, high = interval(prediction, q_low, q_high, scale)
+        if ((actual >= low) & (actual <= high)).mean() >= INTERVAL_COVERAGE:
+            return round(float(scale), 2)
+    return 4.0
 
 
 def fit_blend_weight(residual_pred: np.ndarray, frame: pd.DataFrame) -> float:
@@ -99,7 +128,7 @@ def run_forecast_model(history, weather, issue_time, artifacts, horizon=HORIZON_
         raise IncompleteWeatherError(missing)
 
     prediction = predict_variant(artifacts["variant"], features, artifacts.get("booster"), artifacts.get("blend_weight", 1.0))
-    return pd.DataFrame(
+    result = pd.DataFrame(
         {
             "time_scada": utc_to_scada(features.index),
             "lead_hours": features["lead_hours"].to_numpy(),
@@ -112,27 +141,46 @@ def run_forecast_model(history, weather, issue_time, artifacts, horizon=HORIZON_
         },
         index=features.index,
     )
+    quantile_boosters = artifacts.get("quantiles") or {}
+    if set(quantile_boosters) == set(QUANTILES):
+        low, high = interval(prediction, quantile_boosters["q10"].predict(features[FEATURE_COLUMNS]),
+                             quantile_boosters["q90"].predict(features[FEATURE_COLUMNS]), artifacts.get("interval_scale", 1.0))
+        result["p10"], result["p90"] = low, high
+    return result
+
+
+def _booster_paths(turbine_id: int, directory=ARTIFACTS) -> dict:
+    return {"booster": directory / f"booster_t{turbine_id}.txt",
+            **{name: directory / f"booster_{name}_t{turbine_id}.txt" for name in QUANTILES}}
 
 
 def save_artifacts(turbine_id: int, artifacts: dict, manifest: dict) -> None:
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     joblib.dump(
-        {key: artifacts[key] for key in ("variant", "power_curve", "blend_weight")},
+        {key: artifacts[key] for key in ("variant", "power_curve", "blend_weight", "interval_scale")},
         ARTIFACTS / f"model_t{turbine_id}.joblib",
     )
-    booster_path = ARTIFACTS / f"booster_t{turbine_id}.txt"
-    if artifacts.get("booster") is not None:
-        artifacts["booster"].save_model(str(booster_path))
-    elif booster_path.exists():
-        booster_path.unlink()
+    models = {"booster": artifacts.get("booster"), **(artifacts.get("quantiles") or {})}
+    for name, path in _booster_paths(turbine_id).items():
+        if models.get(name) is not None:
+            models[name].save_model(str(path))
+        elif path.exists():
+            path.unlink()
     (ARTIFACTS / f"manifest_t{turbine_id}.json").write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
 
 
-def load_artifacts(turbine_id: int) -> dict:
-    bundle = joblib.load(ARTIFACTS / f"model_t{turbine_id}.joblib")
-    booster_path = ARTIFACTS / f"booster_t{turbine_id}.txt"
+def _read_booster(path) -> lgb.Booster | None:
     # Git autocrlf changes byte offsets stored in LightGBM text models on Windows.
     # Universal-newline decoding restores LF before LightGBM parses the model.
-    bundle["booster"] = lgb.Booster(model_str=booster_path.read_text(encoding="utf-8")) if booster_path.exists() else None
-    bundle["manifest"] = json.loads((ARTIFACTS / f"manifest_t{turbine_id}.json").read_text(encoding="utf-8"))
+    return lgb.Booster(model_str=path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def load_artifacts(turbine_id: int, directory=None) -> dict:
+    directory = directory or ARTIFACTS
+    bundle = joblib.load(directory / f"model_t{turbine_id}.joblib")
+    paths = _booster_paths(turbine_id, directory)
+    bundle["booster"] = _read_booster(paths["booster"])
+    quantiles = {name: _read_booster(paths[name]) for name in QUANTILES}
+    bundle["quantiles"] = quantiles if all(quantiles.values()) else None
+    bundle["manifest"] = json.loads((directory / f"manifest_t{turbine_id}.json").read_text(encoding="utf-8"))
     return bundle

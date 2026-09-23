@@ -216,6 +216,25 @@ class ForecastAgentTests(unittest.TestCase):
         self.assertAlmostEqual(decision["analysis"]["revision"]["mean_abs_change"], 0.2)
         self.assertEqual(len(list(self.output.glob("*.json"))), 2)
 
+    def test_expired_forecast_is_reissued_even_without_new_weather(self):
+        def loader(lat, lon, stamp, refresh=False):
+            frame = weather_frame()
+            frame["time"] = pd.date_range(stamp + pd.Timedelta(hours=1), periods=48, freq="h")
+            return frame
+
+        self.agent.weather_loader = loader
+        self.agent.run(1, ISSUE)
+        late = self.agent.check_for_update(1, ISSUE + pd.Timedelta(hours=72))
+        self.assertTrue(late["expired"])
+        self.assertTrue(late["recomputed"])
+        self.assertEqual(late["overlap_hours"], 0)
+        short = self.agent.check_for_update(1, ISSUE + pd.Timedelta(hours=72 + 30))
+        self.assertEqual(short["remaining_coverage_hours"], 18)
+        self.assertTrue(short["recomputed"])
+        fresh = self.agent.check_for_update(1, ISSUE + pd.Timedelta(hours=72 + 36))
+        self.assertFalse(fresh["expired"])
+        self.assertFalse(fresh["recomputed"])
+
     def test_incomplete_weather_triggers_one_live_rerequest(self):
         from src.model import IncompleteWeatherError
         calls = []
