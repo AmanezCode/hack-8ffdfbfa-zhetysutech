@@ -131,6 +131,8 @@ def save_artifacts(turbine_id: int, artifacts: dict, manifest: dict) -> None:
 def load_artifacts(turbine_id: int) -> dict:
     bundle = joblib.load(ARTIFACTS / f"model_t{turbine_id}.joblib")
     booster_path = ARTIFACTS / f"booster_t{turbine_id}.txt"
-    bundle["booster"] = lgb.Booster(model_file=str(booster_path)) if booster_path.exists() else None
+    # Git autocrlf changes byte offsets stored in LightGBM text models on Windows.
+    # Universal-newline decoding restores LF before LightGBM parses the model.
+    bundle["booster"] = lgb.Booster(model_str=booster_path.read_text(encoding="utf-8")) if booster_path.exists() else None
     bundle["manifest"] = json.loads((ARTIFACTS / f"manifest_t{turbine_id}.json").read_text(encoding="utf-8"))
     return bundle
