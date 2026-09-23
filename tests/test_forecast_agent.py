@@ -83,11 +83,6 @@ class ForecastAgentTests(unittest.TestCase):
             with self.subTest(value=invalid), self.assertRaises(ValueError):
                 issue_timestamp(invalid)
 
-    def test_archive_path_is_forwarded(self):
-        self.agent.archive_path = Path("explicit-archive.json")
-        self.agent.get_archived_weather_forecast(45.0, 78.0, ISSUE)
-        self.loader.assert_called_once_with(45.0, 78.0, UTC_ISSUE, archive_path=self.agent.archive_path)
-
     def test_bad_weather_fails_before_inference_or_saving(self):
         cases = {}
         cases["short"] = self.weather.iloc[:-1].copy()
@@ -156,7 +151,8 @@ class ForecastAgentTests(unittest.TestCase):
         pred.loc[1, ["level1", "residual_pred", "prediction"]] = [0.1, -0.2, 0.0]
         self.agent.validate_prediction(pred, self.weather)
 
-    def test_zero_wind_power_threshold(self):
+    def test_zero_wind_power_is_flagged_not_rejected(self):
+        # An hourly average can carry power around a calm NWP hour; it is reported, not refused.
         weather = weather_frame(wind=0.0)
         for power in (0.0, 0.05, 0.051, 0.4):
             with self.subTest(power=power):
@@ -164,11 +160,84 @@ class ForecastAgentTests(unittest.TestCase):
                 pred["level1"] = power
                 pred["residual_pred"] = 0.0
                 pred["prediction"] = power
-                if power <= 0.05:
-                    self.agent.validate_prediction(pred, weather)
-                else:
-                    with self.assertRaisesRegex(ValueError, "zero"):
-                        self.agent.validate_prediction(pred, weather)
+                self.agent.validate_prediction(pred, weather)
+                flags = self.agent.analyze_forecast(pred, weather)["flags"]
+                self.assertEqual(any(f["code"] == "zero_wind_power" for f in flags), power > 0.05)
+
+    def test_analysis_reports_days_ramps_band_and_revision(self):
+        pred = prediction_frame(self.weather)
+        pred["level1"] = np.r_[np.full(10, 0.1), np.full(38, 0.8)]
+        pred["residual_pred"] = 0.0
+        pred["prediction"] = pred["level1"]
+        pred.attrs["model"] = {"expected_abs_error_by_lead": list(np.linspace(0.1, 0.2, 48)), "deviation_q99": 0.5}
+        previous = {"run_id": "old", "issue_time": UTC_ISSUE.isoformat(),
+                    "forecast": [{"time": t.isoformat(), "prediction": 0.3} for t in pred["time"]]}
+        analysis = self.agent.analyze_forecast(pred, self.weather, previous)
+        # This fixture issues at 18:00 UTC, so the horizon starts at 01:00 on the SCADA clock.
+        self.assertEqual([d["hours"] for d in analysis["days"]], [23, 24, 1])
+        self.assertEqual(analysis["days"][0]["date_scada"], "2026-02-01")
+        self.assertEqual(len(analysis["ramps"]), 1)
+        self.assertEqual(analysis["ramps"][0]["direction"], "up")
+        self.assertEqual(len(analysis["expected_abs_error"]), 48)
+        self.assertEqual(analysis["revision"]["overlap_hours"], 48)
+        self.assertAlmostEqual(analysis["revision"]["max_abs_change"], 0.5)
+        json.dumps(analysis, allow_nan=False)
+
+    def test_saved_json_carries_inputs_analysis_and_versions(self):
+        self.agent.run(1, ISSUE)
+        first = json.loads(self.agent.last_saved_path.read_text(encoding="utf-8"))
+        self.assertEqual(first["version"], 1)
+        self.assertIsNone(first["supersedes"])
+        self.assertEqual(len(first["inputs"]), 48)
+        self.assertIn("summary", first["analysis"])
+        self.agent.run(1, ISSUE)
+        second = json.loads(self.agent.last_saved_path.read_text(encoding="utf-8"))
+        self.assertEqual(second["version"], 2)
+        self.assertEqual(second["supersedes"], first["run_id"])
+        self.assertEqual(second["analysis"]["revision"]["mean_abs_change"], 0.0)
+
+    def test_update_check_keeps_forecast_when_inputs_unchanged(self):
+        self.agent.run(1, ISSUE)
+        decision = self.agent.check_for_update(1, ISSUE)
+        self.assertFalse(decision["recomputed"])
+        self.assertEqual(decision["overlap_hours"], 48)
+        self.assertEqual(self.runner.call_count, 1)
+        self.assertEqual(len(list(self.output.glob("*.json"))), 1)
+
+    def test_update_check_recomputes_when_weather_changes(self):
+        self.agent.run(1, ISSUE)
+        self.weather.loc[5:8, "wind_fc"] = 11.0
+        self.runner.return_value = components(0.6)
+        with self.assertLogs("src.forecast_agent", level="INFO") as logs:
+            decision = self.agent.check_for_update(1, ISSUE)
+        self.assertTrue(decision["recomputed"])
+        self.assertEqual(decision["changed_hours"], 4)
+        self.assertTrue(any("recomputing" in line for line in logs.output))
+        self.assertAlmostEqual(decision["analysis"]["revision"]["mean_abs_change"], 0.2)
+        self.assertEqual(len(list(self.output.glob("*.json"))), 2)
+
+    def test_incomplete_weather_triggers_one_live_rerequest(self):
+        from src.model import IncompleteWeatherError
+        calls = []
+
+        def loader(lat, lon, stamp, refresh=False):
+            calls.append(refresh)
+            if not refresh:
+                raise IncompleteWeatherError([stamp.tz_localize(None) + pd.Timedelta(hours=3)])
+            return self.weather.copy(deep=True)
+
+        self.agent.weather_loader = loader
+        with self.assertLogs("src.forecast_agent", level="WARNING"):
+            result = self.agent.run(1, ISSUE)
+        self.assertEqual(calls, [False, True])
+        self.assertEqual(len(result), 48)
+
+        def always_missing(lat, lon, stamp, refresh=False):
+            raise IncompleteWeatherError([stamp.tz_localize(None) + pd.Timedelta(hours=3)])
+
+        self.agent.weather_loader = always_missing
+        with self.assertLogs("src.forecast_agent", level="ERROR"), self.assertRaises(IncompleteWeatherError):
+            self.agent.run(2, ISSUE)
 
     def test_missing_coordinates_and_unsupported_turbine_fail_fast(self):
         for coordinates, turbine in (({}, 1), ({1: (45.0, 78.0)}, 2), ({3: (45.0, 78.0)}, 3)):

@@ -21,6 +21,10 @@ ELEVATION_M = 555.0
 # they line up with the hidden February actuals.
 SCADA_UTC_OFFSET_HOURS = 6
 ISSUE_HOUR_UTC = 17  # 23:00 on the SCADA clock: issued at the end of the day for the next two days
+# The agent re-checks every 6 h for fresher weather runs, so the model is trained
+# on issues at all four update hours; CV is scored on the official 17:00 UTC issues.
+UPDATE_INTERVAL_HOURS = 6
+TRAIN_ISSUE_HOURS_UTC = (17, 23, 5, 11)
 MIN_READINGS_PER_HOUR = 4  # of 6 ten-minute readings; sparser hours are not used as labels
 
 HISTORY_START = "2023-03-11"
