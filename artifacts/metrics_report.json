@@ -1,0 +1,64 @@
+{
+  "1": {
+    "model": "t1-direct-d7d0b047c9",
+    "accuracy_1_minus_nMAE": 0.833,
+    "nMAE": 0.167,
+    "nRMSE": 0.2448,
+    "bias": 0.0116,
+    "WAPE": 0.437,
+    "daily_energy_error_share_of_capacity": 0.1125,
+    "within_10pct_of_capacity": 0.5071,
+    "interval_80_cv_coverage": 0.8711,
+    "interval_80_mean_width": 0.5751,
+    "reissue_gain": {
+      "+6h": 0.0209,
+      "+12h": 0.0546,
+      "+18h": 0.0878
+    },
+    "nMAE_by_horizon": {
+      "1-24h": 0.1585,
+      "25-48h": 0.1755
+    },
+    "skill_vs": {
+      "power curve": 0.1218,
+      "climatology": 0.4833,
+      "persistence": 0.5355
+    },
+    "train_seconds": 130.5,
+    "train_rows": 123931,
+    "model_size_kb": 735.8,
+    "inference_ms_per_48h_forecast": 33.2,
+    "agent_cycle_ms_per_forecast": 166.8
+  },
+  "2": {
+    "model": "t2-direct-60103e48d3",
+    "accuracy_1_minus_nMAE": 0.8363,
+    "nMAE": 0.1637,
+    "nRMSE": 0.2441,
+    "bias": 0.0013,
+    "WAPE": 0.4382,
+    "daily_energy_error_share_of_capacity": 0.1105,
+    "within_10pct_of_capacity": 0.5305,
+    "interval_80_cv_coverage": 0.8256,
+    "interval_80_mean_width": 0.5495,
+    "reissue_gain": {
+      "+6h": 0.022,
+      "+12h": 0.0581,
+      "+18h": 0.0906
+    },
+    "nMAE_by_horizon": {
+      "1-24h": 0.156,
+      "25-48h": 0.1714
+    },
+    "skill_vs": {
+      "power curve": 0.1377,
+      "climatology": 0.489,
+      "persistence": 0.5426
+    },
+    "train_seconds": 238.7,
+    "train_rows": 134493,
+    "model_size_kb": 696.4,
+    "inference_ms_per_48h_forecast": 27.0,
+    "agent_cycle_ms_per_forecast": 201.6
+  }
+}

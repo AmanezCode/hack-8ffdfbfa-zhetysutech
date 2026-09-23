@@ -1,14 +1,11 @@
-data/raw/*.csv
-data/raw/*.json
-outputs/*.csv
-outputs/*.json
-__pycache__/
 .venv/
-forecasts/
-data/weather/
-artifacts/
-data/cache/
+__pycache__/
+*.pyc
 .env
 .env.*
 !.env.example
-*.pyc
+
+# Runtime output of the agent CLI and Streamlit sessions. The February replay
+# (forecasts/*.csv), data/ and artifacts/ are tracked on purpose: they make the
+# result reproducible without network or retraining.
+forecasts/*/

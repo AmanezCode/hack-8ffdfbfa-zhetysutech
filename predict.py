@@ -55,8 +55,24 @@ def build(turbine_id: int) -> tuple[dict[str, pd.DataFrame], list[str]]:
               f"mean {forecast['prediction'].mean():.3f}")
 
     if outputs:
-        outputs[f"turbine{turbine_id}_february_all.csv"] = pd.concat(outputs.values())
+        combined = pd.concat(outputs.values())
+        outputs[f"turbine{turbine_id}_february_all.csv"] = combined
+        outputs[f"submission_turbine{turbine_id}.csv"] = submission(combined)
     return outputs, failures
+
+
+SUBMISSION_COLUMNS = ["time_scada", "turbine_id", "prediction", "p10", "p90", "issue_time_scada", "lead_hours", "model_version"]
+
+
+def submission(combined: pd.DataFrame) -> pd.DataFrame:
+    """One value per February hour: day D comes from the issue at 23:00 of day D-1 (lead 1-24).
+
+    The full 48 h issues stay in the per-issue files; this is the flat file to score.
+    """
+    day_ahead = combined[combined["lead_hours"] <= 24]
+    day_ahead = day_ahead[(day_ahead["time_scada"] >= pd.Timestamp(TEST_START)) &
+                          (day_ahead["time_scada"] < pd.Timestamp(TEST_END) + pd.Timedelta(days=1))]
+    return day_ahead[[c for c in SUBMISSION_COLUMNS if c in day_ahead]].sort_values("time_scada")
 
 
 def publish(turbine_ids: list[int], outputs: dict[str, pd.DataFrame]) -> None:
@@ -69,8 +85,8 @@ def publish(turbine_ids: list[int], outputs: dict[str, pd.DataFrame]) -> None:
 
     FORECASTS.mkdir(parents=True, exist_ok=True)
     for turbine_id in turbine_ids:
-        for old in FORECASTS.glob(f"turbine{turbine_id}_*.csv"):
-            old.unlink()
+        for old in [*FORECASTS.glob(f"turbine{turbine_id}_*.csv"), FORECASTS / f"submission_turbine{turbine_id}.csv"]:
+            old.unlink(missing_ok=True)
     for path in staging.iterdir():
         path.replace(FORECASTS / path.name)
     staging.rmdir()
@@ -94,9 +110,13 @@ def main() -> None:
             print(f"  {failure}", file=sys.stderr)
         sys.exit(1)
 
+    if set(turbine_ids) == set(TURBINES):
+        outputs["submission.csv"] = pd.concat(outputs[f"submission_turbine{t}.csv"] for t in turbine_ids).sort_values(
+            ["time_scada", "turbine_id"])
     publish(turbine_ids, outputs)
     expected = len(issue_times())
-    print(f"\npublished {expected} issues x {len(turbine_ids)} turbines to {FORECASTS}")
+    print(f"\npublished {expected} issues x {len(turbine_ids)} turbines to {FORECASTS}; "
+          f"submission: {sum(len(outputs[f'submission_turbine{t}.csv']) for t in turbine_ids)} rows")
 
 
 if __name__ == "__main__":

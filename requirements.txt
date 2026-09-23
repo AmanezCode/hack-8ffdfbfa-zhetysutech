@@ -1,8 +1,12 @@
-pandas>=2.2
-numpy>=1.26
-scikit-learn>=1.4
-lightgbm>=4.5
-joblib>=1.4
-requests>=2.31
-streamlit>=1.40
-plotly>=5.20
+# Requires Python >= 3.12 (numpy 2.5 has no wheels for 3.11). Tested with Python 3.14.7 on Windows 11;
+# pinned so a fresh install reproduces the models bit for bit.
+pandas==3.0.6
+numpy==2.5.3
+lightgbm==4.7.0
+joblib==1.6.0
+requests==2.34.2
+streamlit==1.64.0
+plotly==7.1.0
+# LLM operator layer (optional at run time: without ANTHROPIC_API_KEY / OPENAI_API_KEY a template briefing is used)
+anthropic==1.8.0
+openai==3.19.0
