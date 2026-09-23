@@ -1,0 +1,199 @@
+{
+  "model_version": "t1-direct-99f15ba1",
+  "turbine_id": 1,
+  "variant": "direct",
+  "selection_rule": "lowest mean MAE over rolling monthly folds 2025-11, 2025-12, 2026-01",
+  "cv_mean": {
+    "physics": {
+      "MAE": 0.18984146390043052,
+      "RMSE": 0.2658198192493198
+    },
+    "residual": {
+      "MAE": 0.17948391624678087,
+      "RMSE": 0.2557253409617992
+    },
+    "direct": {
+      "MAE": 0.1784558929209938,
+      "RMSE": 0.2566851040199385
+    }
+  },
+  "cv_folds": [
+    {
+      "month": "2025-11",
+      "pairs": 1391,
+      "unique_targets": 719,
+      "eval_last_target_utc": "2025-11-30 16:00:00",
+      "fit_rows": 25257,
+      "inner_rows": 1285,
+      "scores": {
+        "physics": {
+          "MAE": 0.1837445048993129,
+          "RMSE": 0.2566090676604058
+        },
+        "residual": {
+          "MAE": 0.167910665329531,
+          "RMSE": 0.2320560677208871
+        },
+        "direct": {
+          "MAE": 0.16665345004199345,
+          "RMSE": 0.2325343975433303
+        },
+        "persistence (operational only)": {
+          "MAE": 0.38432542535346265,
+          "RMSE": 0.49438419078010387
+        }
+      },
+      "mae_by_lead": {
+        "1-24h": {
+          "physics": 0.18261818688007495,
+          "residual": 0.16653263524805986,
+          "direct": 0.1658672982924912
+        },
+        "25-48h": {
+          "physics": 0.1848724435200174,
+          "residual": 0.16929067818809776,
+          "direct": 0.16744073294509215
+        }
+      },
+      "residual_iterations": 75,
+      "direct_iterations": 137,
+      "blend_weight": 1.0
+    },
+    {
+      "month": "2025-12",
+      "pairs": 1435,
+      "unique_targets": 741,
+      "eval_last_target_utc": "2025-12-31 16:00:00",
+      "fit_rows": 26591,
+      "inner_rows": 1391,
+      "scores": {
+        "physics": {
+          "MAE": 0.21422851930465303,
+          "RMSE": 0.29663968606016705
+        },
+        "residual": {
+          "MAE": 0.2009642234041553,
+          "RMSE": 0.28998799861027896
+        },
+        "direct": {
+          "MAE": 0.2009430131801162,
+          "RMSE": 0.2919848420998529
+        },
+        "persistence (operational only)": {
+          "MAE": 0.3534065040650406,
+          "RMSE": 0.4754202187924925
+        }
+      },
+      "mae_by_lead": {
+        "1-24h": {
+          "physics": 0.2076934667532063,
+          "residual": 0.19128534173625464,
+          "direct": 0.18984907284266253
+        },
+        "25-48h": {
+          "physics": 0.22077268629480476,
+          "residual": 0.21065660420966809,
+          "direct": 0.21205242623770573
+        }
+      },
+      "residual_iterations": 170,
+      "direct_iterations": 181,
+      "blend_weight": 1.0
+    },
+    {
+      "month": "2026-01",
+      "pairs": 1439,
+      "unique_targets": 743,
+      "eval_last_target_utc": "2026-01-31 16:00:00",
+      "fit_rows": 28079,
+      "inner_rows": 1387,
+      "scores": {
+        "physics": {
+          "MAE": 0.1715513674973256,
+          "RMSE": 0.24421070402738665
+        },
+        "residual": {
+          "MAE": 0.16957686000665634,
+          "RMSE": 0.24513195655423153
+        },
+        "direct": {
+          "MAE": 0.16777121554087177,
+          "RMSE": 0.24553607241663225
+        },
+        "persistence (operational only)": {
+          "MAE": 0.34094046791753535,
+          "RMSE": 0.44895466227759473
+        }
+      },
+      "mae_by_lead": {
+        "1-24h": {
+          "physics": 0.15595540773656846,
+          "residual": 0.1534554983695632,
+          "direct": 0.1522816179192712
+        },
+        "25-48h": {
+          "physics": 0.18716901843994752,
+          "residual": 0.1857206435653588,
+          "direct": 0.18328235641368462
+        }
+      },
+      "residual_iterations": 117,
+      "direct_iterations": 169,
+      "blend_weight": 1.0
+    }
+  ],
+  "blend_weight": 1.0,
+  "train_rows": 31003,
+  "train_target_start": "2024-02-16 18:00:00",
+  "train_target_end": "2026-01-31 16:00:00",
+  "data_cutoff_scada": "2026-01-31",
+  "time_convention": "internal UTC; SCADA clock = UTC+6; issue at 17:00 UTC",
+  "weather": {
+    "endpoint": "https://previous-runs-api.open-meteo.com/v1/forecast",
+    "grid": [
+      43.620384,
+      78.47891
+    ],
+    "retrieved_at": "2026-09-23T09:55:16+00:00",
+    "sha256": "99f15ba15c58d3ec1cd395c489f79cf123566bf87a2a2e7b280728e5744b1c6a",
+    "availability_rule": "previous_dayN with N = ceil((lead + 12) / 24)"
+  },
+  "feature_schema": [
+    "wind_fc",
+    "temp_fc",
+    "air_density",
+    "wind_corrected",
+    "level1",
+    "level1_mean3",
+    "run_day",
+    "lead_hours",
+    "hour",
+    "day_of_week",
+    "month",
+    "wind_fc_prev",
+    "wind_fc_next",
+    "wind_fc_mean3",
+    "wind_fc_std3",
+    "wind_fc_ramp"
+  ],
+  "lgb_params": {
+    "objective": "regression_l1",
+    "metric": "l1",
+    "learning_rate": 0.03,
+    "num_leaves": 31,
+    "min_data_in_leaf": 200,
+    "feature_fraction": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 1,
+    "lambda_l2": 5.0,
+    "verbosity": -1,
+    "seed": 42
+  },
+  "versions": {
+    "python": "3.14.7",
+    "pandas": "3.0.6",
+    "numpy": "2.5.3",
+    "lightgbm": "4.7.0",
+    "scikit-learn": "1.9.1"
+  }
+}
