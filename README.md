@@ -45,3 +45,15 @@ python scripts/check_agent_replay.py
 публикации 12 часов остаётся допущением ML-команды, см. [docs/ml.md](docs/ml.md).
 
 The supplied measurements end at 2026-01-31 23:00. Therefore February 2026 MAE cannot be computed from these files; a historically archived weather forecast vintage and February ground truth are required for final competition validation. `forecast.json` is retained as an input artifact, but is not treated as an archived forecast vintage.
+
+## Streamlit UI
+
+Запустите интерфейс поверх актуального `ForecastAgent`:
+
+```powershell
+streamlit run app.py
+```
+
+Выберите турбину и одну дату февраля для почасового графика на 48 часов или весь февраль для повторного запуска агента по каждому дню. Архив Previous Runs и модели уже лежат в репозитории; при их отсутствии агент сообщит об ошибке входных данных.
+
+Интерфейс показывает логи вызовов инструментов и почасовой прогноз. Агент сохраняет версионированный JSON с метаданными в `forecasts/streamlit/`; путь виден в логе. MAE/RMSE январского validation fold читаются из `artifacts/manifest_tN.json`. В сравнительной таблице также доступны physics, residual, direct и persistence; отдельный expander показывает средние CV-метрики за ноябрь 2025 — январь 2026. Эти backtest-оценки не являются фактической оценкой февраля: фактические значения за тестовый период в репозитории отсутствуют.
