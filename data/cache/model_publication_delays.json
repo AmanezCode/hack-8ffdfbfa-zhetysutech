@@ -1,0 +1,48 @@
+{
+  "retrieved_at": "2026-09-23T10:18:57+00:00",
+  "configured_hours": 12,
+  "models": [
+    {
+      "model": "dwd_icon",
+      "run_initialisation_utc": "2026-09-23T06:00+00:00",
+      "run_availability_utc": "2026-09-23T09:47+00:00",
+      "delay_hours": 3.79
+    },
+    {
+      "model": "ncep_gfs013",
+      "run_initialisation_utc": "2026-09-23T00:00+00:00",
+      "run_availability_utc": "2026-09-23T05:30+00:00",
+      "delay_hours": 5.52
+    },
+    {
+      "model": "ncep_gfs025",
+      "run_initialisation_utc": "2026-09-23T00:00+00:00",
+      "run_availability_utc": "2026-09-23T06:28+00:00",
+      "delay_hours": 6.48
+    },
+    {
+      "model": "cma_grapes_global",
+      "run_initialisation_utc": "2026-09-23T00:00+00:00",
+      "run_availability_utc": "2026-09-23T06:19+00:00",
+      "delay_hours": 6.33
+    },
+    {
+      "model": "ecmwf_ifs",
+      "run_initialisation_utc": "2026-09-23T00:00+00:00",
+      "run_availability_utc": "2026-09-23T07:00+00:00",
+      "delay_hours": 7.01
+    },
+    {
+      "model": "ecmwf_ifs025",
+      "run_initialisation_utc": "2026-09-23T00:00+00:00",
+      "run_availability_utc": "2026-09-23T07:46+00:00",
+      "delay_hours": 7.77
+    },
+    {
+      "model": "jma_gsm",
+      "run_initialisation_utc": "2026-09-23T00:00+00:00",
+      "run_availability_utc": "2026-09-23T09:34+00:00",
+      "delay_hours": 9.58
+    }
+  ]
+}
