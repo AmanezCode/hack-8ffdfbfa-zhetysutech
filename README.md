@@ -1,40 +1,59 @@
-# Wind Forecast Agent
+# hack-8ffdfbfa-zhetysutech
+Hackathon team repository for ZhetysuTech
 
-Streamlit-интерфейс и backend-оркестратор для ML-модели прогноза нормализованной мощности ВЭС. Для каждой даты февраля агент воспроизводит запуск в 23:00 накануне и строит почасовой прогноз на следующие 48 часов.
+## Forecasting baseline
 
-## Запуск
-
-Требуется Python 3.10 или новее.
-
-```powershell
-pip install -r requirements.txt
-```
-
-Датасеты можно положить в `data/raw` под именами `turbine1.csv` и `turbine2.csv`. Загрузчик также находит исходные файлы HackAlem с именами вида `… - turbine 1.csv` в папке `Desktop\track`. Для другой папки задайте переменную:
+The first runnable baseline is in `src/forecast_pipeline.py`. It reads the two 10-minute turbine files from `data/raw`, aggregates them to hourly observations, trains a leakage-safe gradient boosting model, runs weekly rolling validation on the available pre-test history, and writes a 48-hour forecast.
 
 ```powershell
-$env:WIND_DATA_DIR = "C:\path\to\datasets"
+python -m pip install -r requirements.txt
+python src/forecast_pipeline.py --horizon 48
 ```
 
-Обучите модели и сохраните backtest-метрики за январь:
+Outputs are written to `outputs/`: `audit.json`, `backtest_results.csv`, and `forecast.csv`.
+
+## ForecastAgent
+
+Роль #2 реализована в `src/forecast_agent.py`. Агент выполняет загрузку погоды,
+проверку 48 часов, вызов ML, проверку результата и сохранение JSON.
+Контракт и подключение ML описаны в [docs/FORECAST_AGENT.md](docs/FORECAST_AGENT.md).
+Быстрая проверка без внешних данных:
 
 ```powershell
-python train.py
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+python -m src.agent_demo
 ```
 
-Первое обучение запрашивает архив прогнозов погоды Open-Meteo и требует доступа к сети. Модели и метрики появятся в `artifacts/`.
+Демо использует только синтетическую погоду и тестовый расчёт мощности;
+оно не является историческим прогнозом и не измеряет MAE.
+Рабочий CLI: `python -m src.agent_cli --help`.
+Результат: DataFrame `[time, level1, residual_pred, prediction, wind_fc, lead_hours]`
+и JSON в `forecasts/`, с метаданными запуска и погодного источника.
+Время обязательно содержит часовой пояс; горизонт — часы +1..+48.
+ML-коммит 98a9a59 интегрирован через src/ml_bridge.py. Обученные модели,
+SCADA и Previous Runs уже доступны в репозитории. Внутри ML используется UTC,
+часы SCADA — фиксированный UTC+6. Реальный запуск из кэша:
 
-Запустите UI:
+```powershell
+python -m src.agent_cli --turbine 1 --issue-time '2026-01-31T17:00:00Z'
+python scripts/check_agent_replay.py
+```
+
+Проверены все 56 выпусков агента (2 688 строк): совпадают с ML replay.
+Выход JSON включает версию модели и выбранные run_day. Историческая задержка
+публикации 12 часов остаётся допущением ML-команды, см. [docs/ml.md](docs/ml.md).
+
+The supplied measurements end at 2026-01-31 23:00. Therefore February 2026 MAE cannot be computed from these files; a historically archived weather forecast vintage and February ground truth are required for final competition validation. `forecast.json` is retained as an input artifact, but is not treated as an archived forecast vintage.
+
+## Streamlit UI
+
+Запустите интерфейс поверх актуального `ForecastAgent`:
 
 ```powershell
 streamlit run app.py
 ```
 
-## Сценарии интерфейса
+Выберите турбину и одну дату февраля для почасового графика на 48 часов или весь февраль для повторного запуска агента по каждому дню. Архив Previous Runs и модели уже лежат в репозитории; при их отсутствии агент сообщит об ошибке входных данных.
 
-- Выберите турбину и дату февраля, затем нажмите **RUN** для одного 48-часового прогноза.
-- Выберите **Весь февраль**, чтобы воспроизвести ежедневные запуски с 1 по 28 февраля. Тепловая карта сравнивает все 48 lead-часов для каждой даты; выбранный запуск можно посмотреть отдельным графиком и скачать в CSV.
-- Лог `ForecastAgent` показывает вызовы инструментов с префиксом `[TOOL]` и сообщения агента с `[AGENT]`.
-- MAE/RMSE и сравнение с физической кривой и persistence baseline читаются из январского backtest, сохранённого `train.py`.
-
-Прогноз и backtest используют нормализованную мощность в диапазоне 0–1. В карточках интерфейса ошибки умножены на 100 и показаны как проценты.
+Интерфейс показывает логи вызовов инструментов и почасовой прогноз. Агент сохраняет версионированный JSON с метаданными в `forecasts/streamlit/`; путь виден в логе. MAE/RMSE январского validation fold читаются из `artifacts/manifest_tN.json`. В сравнительной таблице также доступны physics, residual, direct и persistence; отдельный expander показывает средние CV-метрики за ноябрь 2025 — январь 2026. Эти backtest-оценки не являются фактической оценкой февраля: фактические значения за тестовый период в репозитории отсутствуют.

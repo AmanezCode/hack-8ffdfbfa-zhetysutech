@@ -1,0 +1,14 @@
+data/raw/*.csv
+data/raw/*.json
+outputs/*.csv
+outputs/*.json
+__pycache__/
+.venv/
+forecasts/
+data/weather/
+artifacts/
+data/cache/
+.env
+.env.*
+!.env.example
+*.pyc
