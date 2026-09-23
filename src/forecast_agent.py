@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from requests.exceptions import ConnectionError as RequestsConnectionError, Timeout as RequestsTimeout
 
 from .artifact_adapter import load_artifacts, run_forecast_model
 from .archived_weather import load_weather
@@ -45,10 +46,14 @@ class ForecastAgent:
         self.weather_loader = weather_loader
         self.model_runner = model_runner
         self.last_saved_path: Path | None = None
+        self._model_metadata: dict = {}
 
     def get_archived_weather_forecast(self, lat: float, lon: float, issue_date: str | pd.Timestamp) -> pd.DataFrame:
         stamp = issue_timestamp(issue_date)
         loader = self.weather_loader or load_weather
+        if self.weather_loader is None and self.archive_path is None and self.model_backend == "team":
+            from .ml_bridge import load_team_weather
+            loader = load_team_weather
         weather = loader(lat, lon, stamp) if self.archive_path is None else loader(lat, lon, stamp, archive_path=self.archive_path)
         self.validate_weather(weather)
         expected = pd.date_range(stamp + pd.Timedelta(hours=1), periods=48, freq="h")
@@ -89,7 +94,9 @@ class ForecastAgent:
             outputs = run_forecast_model(turbine_id, issue_time, weather.copy(deep=True), load_artifacts(self.artifacts_dir))
         else:
             from .ml_bridge import run_team_model
-            outputs = run_team_model(turbine_id, issue_time, weather.copy(deep=True), self.artifacts_dir)
+            team_result = run_team_model(turbine_id, issue_time, weather.copy(deep=True), self.artifacts_dir)
+            self._model_metadata = team_result.attrs["model"]
+            outputs = tuple(team_result[name].to_numpy() for name in ("level1", "residual_pred", "prediction"))
         if len(outputs) != 3:
             raise ValueError("Model must return level1, residual_pred, prediction")
         arrays = tuple(np.asarray(value, dtype=float) for value in outputs)
@@ -147,7 +154,8 @@ class ForecastAgent:
         path = self.output_dir / f"turbine_{turbine_id}_{stamp.strftime('%Y%m%dT%H%M%SZ')}_{run_id}.json"
         records = json.loads(pred[COLUMNS].to_json(orient="records", date_format="iso"))
         payload = {"turbine_id": turbine_id, "issue_time": stamp.isoformat(),
-                   "run_id": run_id, "weather": pred.attrs.get("weather", {}), "forecast": records}
+                   "run_id": run_id, "weather": pred.attrs.get("weather", {}),
+                   "model": pred.attrs.get("model", {}), "forecast": records}
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False, indent=2, default=str), encoding="utf-8")
         temporary.replace(path)
@@ -157,6 +165,7 @@ class ForecastAgent:
 
     def forecast(self, turbine_id: int, issue_time: str | pd.Timestamp) -> pd.DataFrame:
         self.last_saved_path = None
+        self._model_metadata = {}
         stamp = issue_timestamp(issue_time)
         LOG.info("loading_weather turbine=%s issue=%s", turbine_id, stamp)
         weather = self._weather(turbine_id, stamp)
@@ -169,7 +178,8 @@ class ForecastAgent:
         result["lead_hours"] = np.arange(1, len(result) + 1)
         self.validate_prediction(result, weather)
         result = result[COLUMNS]
-        result.attrs["weather"] = dict(weather.attrs)
+        result.attrs = {"weather": {k: v for k, v in weather.attrs.items() if not k.startswith("_")},
+                        "model": dict(self._model_metadata)}
         self.save_forecast(turbine_id, stamp, result)
         return result
 
@@ -187,7 +197,7 @@ class ForecastAgent:
             except (FileNotFoundError, ValueError):
                 LOG.exception("forecast_failed turbine=%s", turbine_id)
                 raise
-            except (TimeoutError, ConnectionError):
+            except (TimeoutError, ConnectionError, RequestsTimeout, RequestsConnectionError):
                 LOG.warning("transient_failure attempt=%s", attempt + 1)
                 if attempt + 1 == max_attempts:
                     raise

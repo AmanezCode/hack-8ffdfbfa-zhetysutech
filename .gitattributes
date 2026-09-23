@@ -1,0 +1,2 @@
+# LightGBM text models include byte offsets; retain LF when checked out on Windows.
+artifacts/booster_t*.txt text eol=lf

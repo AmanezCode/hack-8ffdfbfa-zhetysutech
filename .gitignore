@@ -11,3 +11,4 @@ data/cache/
 .env
 .env.*
 !.env.example
+*.pyc

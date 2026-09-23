@@ -31,10 +31,17 @@ python -m src.agent_demo
 Результат: DataFrame `[time, level1, residual_pred, prediction, wind_fc, lead_hours]`
 и JSON в `forecasts/`, с метаданными запуска и погодного источника.
 Время обязательно содержит часовой пояс; горизонт — часы +1..+48.
-Для реального запуска нужны артефакты ML, подтверждённые координаты и архивные
-прогнозы с датами выпуска/доступности. ML-код из main интегрирован через
-src/ml_bridge.py: PowerCurve + LightGBM, без изменения модулей товарища.
-Для него архив содержит 50 часов (+0..49), результат — 48 часов (+1..48).
-Обученные рабочие артефакты и подтверждённые архивные выпуски пока отсутствуют.
+ML-коммит 98a9a59 интегрирован через src/ml_bridge.py. Обученные модели,
+SCADA и Previous Runs уже доступны в репозитории. Внутри ML используется UTC,
+часы SCADA — фиксированный UTC+6. Реальный запуск из кэша:
+
+```powershell
+python -m src.agent_cli --turbine 1 --issue-time '2026-01-31T17:00:00Z'
+python scripts/check_agent_replay.py
+```
+
+Проверены все 56 выпусков агента (2 688 строк): совпадают с ML replay.
+Выход JSON включает версию модели и выбранные run_day. Историческая задержка
+публикации 12 часов остаётся допущением ML-команды, см. [docs/ml.md](docs/ml.md).
 
 The supplied measurements end at 2026-01-31 23:00. Therefore February 2026 MAE cannot be computed from these files; a historically archived weather forecast vintage and February ground truth are required for final competition validation. `forecast.json` is retained as an input artifact, but is not treated as an archived forecast vintage.
