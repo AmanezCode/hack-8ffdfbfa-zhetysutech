@@ -1,6 +1,7 @@
 """Fit the two-level model per turbine and report walk-forward validation."""
 
 import argparse
+import json
 
 import numpy as np
 import pandas as pd
@@ -27,7 +28,7 @@ def daily_issue_times(history: pd.DataFrame) -> pd.DatetimeIndex:
     return pd.date_range(first, last, freq="1D")
 
 
-def evaluate(table: pd.DataFrame, booster, feature_columns, blend_weight: float) -> pd.DataFrame:
+def evaluate(table: pd.DataFrame, booster, feature_columns, blend_weight: float) -> tuple[pd.DataFrame, pd.DataFrame]:
     residual = booster.predict(table[feature_columns])
     prediction = np.clip(table["level1"] + blend_weight * residual, 0.0, 1.0)
     actual = table["actual"]
@@ -56,6 +57,32 @@ def evaluate(table: pd.DataFrame, booster, feature_columns, blend_weight: float)
         }
     )
     return summary, per_lead
+
+
+def save_backtest_metrics(turbine_id: int, issue_times: pd.DatetimeIndex, summary: pd.DataFrame, per_lead: pd.DataFrame) -> None:
+    """Persist the January walk-forward scores for the application dashboard."""
+    from src.config import ARTIFACTS
+
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "turbine_id": turbine_id,
+        "validation_issue_start": issue_times.min().isoformat(),
+        "validation_issue_end": issue_times.max().isoformat(),
+        "models": [
+            {
+                "model": str(row["model"]),
+                "MAE": float(row["MAE"]),
+                "RMSE": float(row["RMSE"]),
+            }
+            for row in summary.to_dict(orient="records")
+        ],
+        "mae_by_lead": {
+            str(index): {str(column): float(value) for column, value in row.items()}
+            for index, row in per_lead.iterrows()
+        },
+    }
+    path = ARTIFACTS / f"backtest_t{turbine_id}.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def run(turbine_id: int) -> None:
@@ -101,6 +128,8 @@ def run(turbine_id: int) -> None:
     print(summary.to_string(index=False))
     print("\nMAE by lead time:")
     print(per_lead.to_string())
+    save_backtest_metrics(turbine_id, valid_issues, summary, per_lead)
+    print(f"January backtest metrics saved for turbine {turbine_id}")
 
     save_artifacts(turbine_id, power_curve, booster, blend_weight)
     print(f"artifacts saved for turbine {turbine_id}")

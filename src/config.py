@@ -1,7 +1,8 @@
 from pathlib import Path
+import os
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA_RAW = ROOT / "data" / "raw"
+DATA_RAW = Path(os.environ.get("WIND_DATA_DIR", ROOT / "data" / "raw"))
 DATA_CACHE = ROOT / "data" / "cache"
 ARTIFACTS = ROOT / "artifacts"
 FORECASTS = ROOT / "forecasts"
