@@ -7,9 +7,10 @@ stitches the first hours of successive runs, so a 48 h forecast built from it
 would contain runs published after the issue time.
 
 Besides the blended ``best_match`` series (wind, temperature and a few extra
-variables) the archive holds 100 m wind from three NWP models separately
-(ECMWF IFS, GFS, ICON): their disagreement is a strong signal of forecast error.
-All of them publish within 8 h of initialisation, inside the 12 h rule.
+variables) the archive holds 100 m wind from four NWP models separately (ECMWF
+IFS, ECMWF AIFS, GFS, ICON) and 10 m wind from three more (UK Met Office, CMA,
+JMA): their disagreement is a strong signal of forecast error. All of them
+publish within 10 h of initialisation, inside the availability rule.
 """
 
 import gzip
@@ -21,15 +22,18 @@ import numpy as np
 import pandas as pd
 import requests
 
-from src.config import DATA_CACHE, HISTORY_START, PREVIOUS_RUN_DAYS, PUBLICATION_DELAY_HOURS, TURBINES, WEATHER_END
+from src.config import DATA_CACHE, HISTORY_START, PREVIOUS_RUN_DAYS, PUBLICATION_DELAY_HOURS, RUN_CYCLE_HOURS, TURBINES, WEATHER_END
 
 ENDPOINT = "https://previous-runs-api.open-meteo.com/v1/forecast"
 CORE = {"wind_speed_100m": "wind", "temperature_2m": "temp"}
 EXTRA = {"wind_speed_10m": "wind10", "wind_gusts_10m": "gust", "wind_direction_100m": "wdir",
          "surface_pressure": "pres", "relative_humidity_2m": "rh"}
-ENSEMBLE = {"ecmwf_ifs025": "ecmwf", "gfs_seamless": "gfs", "icon_seamless": "icon"}
+ENSEMBLE = {"ecmwf_ifs025": "ecmwf", "gfs_seamless": "gfs", "icon_seamless": "icon", "ecmwf_aifs025_single": "aifs"}
 ENSEMBLE_VARIABLE = "wind_speed_100m"
-CACHE_VERSION = "v2"
+# Models without 100 m wind in the archive contribute their 10 m wind.
+SURFACE_ENSEMBLE = {"ukmo_seamless": "ukmo", "cma_grapes_global": "cma", "jma_seamless": "jma"}
+SURFACE_VARIABLE = "wind_speed_10m"
+CACHE_VERSION = "v3"
 
 
 def day_column(base: str, day: int, model: str = "") -> str:
@@ -59,8 +63,10 @@ def fetch_previous_runs(lat: float, lon: float, start_date: str, end_date: str) 
     digest = hashlib.sha256(content)
 
     ensemble_meta = {}
-    for model, short in ENSEMBLE.items():
-        columns = _day_columns(ENSEMBLE_VARIABLE)
+    members = [(model, short, ENSEMBLE_VARIABLE) for model, short in ENSEMBLE.items()]
+    members += [(model, short, SURFACE_VARIABLE) for model, short in SURFACE_ENSEMBLE.items()]
+    for model, short, variable in members:
+        columns = _day_columns(variable)
         part, part_payload, part_content = _get(common | {"hourly": ",".join(columns), "models": model})
         frame = frame.join(part.rename(columns={c: f"{c}_{short}" for c in columns}))
         digest.update(part_content)
@@ -108,18 +114,31 @@ def weather_provenance(turbine_id: int, start_date: str = HISTORY_START, end_dat
     return json.loads(_cache_stem(turbine_id, start_date, end_date).with_suffix(".json").read_text(encoding="utf-8"))
 
 
-def run_day_for_lead(lead_hours) -> np.ndarray:
-    """Freshest previous-run day guaranteed to be published before the issue time.
+def run_start(issue_time: pd.Timestamp, lead_hours, run_day) -> np.ndarray:
+    """Start of the run behind ``previous_dayN`` for valid time issue_time + lead.
 
-    A value from ``previous_dayN`` comes from a run initialised at most N*24 h
-    before its valid time and published PUBLICATION_DELAY_HOURS later, so it is
-    available at issue time when N*24 >= lead + delay.
+    That value comes from the latest run started at or before valid time - N*24 h;
+    runs start on the RUN_CYCLE_HOURS grid (00/06/12/18 UTC).
     """
     lead = np.asarray(lead_hours, dtype=float)
-    days = np.ceil((lead + PUBLICATION_DELAY_HOURS) / 24.0).astype(int)
-    days = np.maximum(days, 1)
+    latest = issue_time + pd.to_timedelta(lead - 24.0 * np.asarray(run_day, dtype=float), unit="h")
+    return pd.DatetimeIndex(latest).floor(f"{RUN_CYCLE_HOURS}h").to_numpy()
+
+
+def run_published_by(issue_time: pd.Timestamp, lead_hours, run_day) -> np.ndarray:
+    """True where the run behind ``previous_dayN`` was public at issue_time."""
+    published = run_start(issue_time, lead_hours, run_day) + np.timedelta64(PUBLICATION_DELAY_HOURS, "h")
+    return published <= np.datetime64(issue_time)
+
+
+def run_day_for_lead(lead_hours, issue_time: pd.Timestamp) -> np.ndarray:
+    """Freshest previous-run day whose run was published before the issue time."""
+    lead = np.asarray(lead_hours, dtype=float)
+    days = np.full(lead.shape, PREVIOUS_RUN_DAYS + 1)
+    for day in range(PREVIOUS_RUN_DAYS, 0, -1):
+        days = np.where(run_published_by(issue_time, lead, day), day, days)
     if days.max() > PREVIOUS_RUN_DAYS:
-        raise ValueError(f"lead {lead.max():.0f}h needs previous_day{days.max()}, archive has {PREVIOUS_RUN_DAYS}")
+        raise ValueError(f"lead {lead.max():.0f}h has no run published before {issue_time} in {PREVIOUS_RUN_DAYS} days of archive")
     return days
 
 
@@ -139,7 +158,7 @@ def weather_snapshot(weather: pd.DataFrame, issue_time: pd.Timestamp, times: pd.
     no admissible core run stay NaN.
     """
     lead = (times - issue_time) / pd.Timedelta(hours=1)
-    required = run_day_for_lead(lead)
+    required = run_day_for_lead(lead, issue_time)
     rows = weather.reindex(times)
 
     core = {short: _stack(rows, base) for base, short in CORE.items()}
@@ -161,4 +180,6 @@ def weather_snapshot(weather: pd.DataFrame, issue_time: pd.Timestamp, times: pd.
         snapshot[f"{short}_fc"] = at_chosen(_stack(rows, base))
     for short in ENSEMBLE.values():
         snapshot[f"wind_{short}_fc"] = at_chosen(_stack(rows, ENSEMBLE_VARIABLE, short))
+    for short in SURFACE_ENSEMBLE.values():
+        snapshot[f"wind10_{short}_fc"] = at_chosen(_stack(rows, SURFACE_VARIABLE, short))
     return snapshot

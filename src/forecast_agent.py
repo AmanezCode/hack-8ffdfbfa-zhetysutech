@@ -191,7 +191,8 @@ class ForecastAgent:
                 flags.append({"code": "curve_deviation", "hours": unusual, "limit": round(float(deviation_limit), 4),
                               "text": f"{unusual} h deviate from the power curve more than the CV 99th percentile ({deviation_limit:.2f})"})
         if weather is not None and "run_day" in weather:
-            older = int((weather["run_day"].to_numpy() > run_day_for_lead(lead)).sum())
+            issue_time = (_utc(pred["time"]).iloc[0] - pd.Timedelta(hours=int(lead[0]))).tz_localize(None)
+            older = int((weather["run_day"].to_numpy() > run_day_for_lead(lead, issue_time)).sum())
             if older:
                 flags.append({"code": "older_weather_run", "hours": older,
                               "text": f"{older} h use an older weather run than usual (freshest run missing in the archive)"})
@@ -406,7 +407,9 @@ class ForecastAgent:
             team_result = run_team_model(turbine_id, issue_time, weather.copy(deep=True), self.artifacts_dir)
             self._model_metadata = team_result.attrs["model"]
             if {"p10", "p90"} <= set(team_result.columns):
-                self._interval = {"low": team_result["p10"].round(4).tolist(), "high": team_result["p90"].round(4).tolist()}
+                # Rounded outwards so the published band still contains the forecast.
+                self._interval = {"low": (np.floor(team_result["p10"] * 1e4) / 1e4).tolist(),
+                                  "high": (np.ceil(team_result["p90"] * 1e4) / 1e4).tolist()}
             outputs = tuple(team_result[name].to_numpy() for name in ("level1", "residual_pred", "prediction"))
         if len(outputs) != 3:
             raise ValueError("Model must return level1, residual_pred, prediction")

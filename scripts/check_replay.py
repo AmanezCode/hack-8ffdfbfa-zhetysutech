@@ -13,6 +13,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import FORECASTS, HORIZON_HOURS, PUBLICATION_DELAY_HOURS, TURBINES  # noqa: E402
+from src.weather import run_published_by  # noqa: E402
 from src.data import load_turbine_hourly  # noqa: E402
 from src.model import IncompleteWeatherError, load_artifacts, run_forecast_model  # noqa: E402
 from src.weather import load_weather  # noqa: E402
@@ -37,8 +38,9 @@ def main() -> None:
         check((counts == HORIZON_HOURS).all() and len(counts) == 28, f"28 issues x {HORIZON_HOURS} h")
 
         lead = (forecast["time_utc"] - forecast["issue_time_utc"]) / pd.Timedelta(hours=1)
-        check((forecast["run_day"] * 24 >= lead + PUBLICATION_DELAY_HOURS).all(),
-              f"every weather value from a run published >= {PUBLICATION_DELAY_HOURS} h before issue")
+        published = [run_published_by(issue, lead[rows.index], rows["run_day"]).all()
+                     for issue, rows in forecast.groupby("issue_time_utc")]
+        check(all(published), f"every weather value from a run published before issue (start + {PUBLICATION_DELAY_HOURS} h)")
 
         shared = forecast.groupby("time_utc").filter(lambda g: len(g) > 1)
         spread = shared.groupby("time_utc")["wind_fc"].agg(lambda s: s.max() - s.min())
@@ -68,7 +70,9 @@ def main() -> None:
               "forecast does not depend on recent SCADA")
 
         tampered = weather.copy()
-        late = tampered.index > issue + pd.Timedelta(hours=HORIZON_HOURS + 1)
+        # The model reads one hour past the horizon for the neighbour window and one more for
+        # the hour means; both come from runs published before issue. Anything later must not matter.
+        late = tampered.index > issue + pd.Timedelta(hours=HORIZON_HOURS + 2)
         tampered.loc[late] = tampered.loc[late] * 3 + 5
         check(np.allclose(run_forecast_model(history, tampered, issue, artifacts)["prediction"], reference["prediction"]),
               "weather beyond the horizon does not change the forecast")
@@ -95,8 +99,9 @@ def main() -> None:
             run_forecast_model(history, all_missing, issue, artifacts)
             raised = False
         except IncompleteWeatherError as error:
-            raised = list(error.missing_hours) == [target]
-        check(raised, "no admissible run -> IncompleteWeatherError naming the hour, not a shorter forecast")
+            # the hour before needs `target` too: each hour is the mean of its start and end
+            raised = list(error.missing_hours) == [target - pd.Timedelta(hours=1), target]
+        check(raised, "no admissible run -> IncompleteWeatherError naming the hours, not a shorter forecast")
 
 
 if __name__ == "__main__":

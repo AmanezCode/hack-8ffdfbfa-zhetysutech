@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 
 from src import model
-from src.config import ARTIFACTS, TURBINES, PUBLICATION_DELAY_HOURS
+from src.config import ARTIFACTS, TURBINES
+from src.weather import run_published_by
 from src.forecast_agent import ForecastAgent
 from src.ml_bridge import load_team_weather, run_team_model
 
@@ -31,13 +32,15 @@ class TeamMLTests(unittest.TestCase):
                 np.testing.assert_allclose(result.prediction, reference.prediction, rtol=0, atol=1e-10)
                 np.testing.assert_allclose(result.level1 + result.residual_pred, result.prediction, atol=1e-10)
                 payload = json.loads(agent.last_saved_path.read_text(encoding="utf-8"))
-                self.assertEqual(payload["model"]["variant"], "direct")
-                self.assertTrue(payload["model"]["model_version"].startswith(f"t{turbine}-direct"))
+                manifest = json.loads((ARTIFACTS / f"manifest_t{turbine}.json").read_text(encoding="utf-8"))
+                self.assertEqual(payload["model"]["variant"], manifest["variant"])
+                self.assertEqual(payload["model"]["model_version"], manifest["model_version"])
+                self.assertTrue(manifest["model_version"].startswith(f"t{turbine}-{manifest['variant']}-"))
                 self.assertNotIn("_team_archive", payload["weather"])
                 self.assertEqual(len(payload["forecast"]), 48)
                 self.assertEqual(payload["forecast"][0]["time"], "2026-01-31T18:00:00.000Z")
                 days = np.asarray(payload["weather"]["run_day"])
-                self.assertTrue((days * 24 >= np.arange(1, 49) + PUBLICATION_DELAY_HOURS).all())
+                self.assertTrue(run_published_by(ISSUE.tz_localize(None), np.arange(1, 49), days).all())
 
     def test_future_model_rejected_and_no_result_saved(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -58,7 +61,8 @@ class TeamMLTests(unittest.TestCase):
             with self.assertLogs("src.forecast_agent", level="ERROR"), \
                     self.assertRaises(model.IncompleteWeatherError) as caught:
                 agent.run(1, ISSUE)
-            self.assertEqual(caught.exception.missing_hours, [target])
+            # The hour before also needs `target`: each hour is the mean of its start and end.
+            self.assertEqual(caught.exception.missing_hours, [target - pd.Timedelta(hours=1), target])
             live.assert_called_once()
             self.assertEqual(list(Path(directory).glob("*.json")), [])
 
@@ -175,11 +179,13 @@ class TeamMLTests(unittest.TestCase):
             # Reproduce Windows checkout conversion without modifying tracked artifacts.
             for name in ("model_t1.joblib", "manifest_t1.json"):
                 (root / name).write_bytes((ARTIFACTS / name).read_bytes())
-            text = (ARTIFACTS / "booster_t1.txt").read_text(encoding="utf-8")
-            (root / "booster_t1.txt").write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
+            for name in ("booster_t1.txt", "booster_wind_t1.txt"):
+                if (ARTIFACTS / name).exists():
+                    text = (ARTIFACTS / name).read_text(encoding="utf-8")
+                    (root / name).write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
             with patch("src.model.ARTIFACTS", root):
                 loaded = model.load_artifacts(1)
-                self.assertEqual(loaded["variant"], "direct")
+                self.assertEqual(loaded["variant"], json.loads((ARTIFACTS / "manifest_t1.json").read_text(encoding="utf-8"))["variant"])
             cfg = TURBINES[1]
             weather = load_team_weather(cfg["lat"], cfg["lon"], ISSUE)
             result = run_team_model(1, ISSUE, weather, root)

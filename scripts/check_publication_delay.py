@@ -14,7 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import DATA_CACHE, PUBLICATION_DELAY_HOURS  # noqa: E402
 
-MODELS = ["dwd_icon", "ncep_gfs013", "ncep_gfs025", "cma_grapes_global", "ecmwf_ifs", "ecmwf_ifs025", "jma_gsm"]
+MODELS = ["dwd_icon", "ncep_gfs013", "ncep_gfs025", "cma_grapes_global", "ecmwf_ifs", "ecmwf_ifs025",
+          "ecmwf_aifs025_single", "ukmo_global_deterministic_10km", "jma_gsm"]
 
 
 def main() -> None:

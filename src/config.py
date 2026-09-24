@@ -37,9 +37,13 @@ TEST_END = "2026-02-28"
 WEATHER_START = "2024-02-16"
 WEATHER_END = "2026-03-02"
 PREVIOUS_RUN_DAYS = 3
-# Init-to-availability on Open-Meteo ranges from 3.8 h (ICON) to 7.8 h (ECMWF
-# IFS 0.25) and 9.6 h (JMA); best_match may use any of them, so 12 h covers the
-# slowest with margin (scripts/check_publication_delay.py).
-PUBLICATION_DELAY_HOURS = 12
+# Global models start a run every 6 h (00/06/12/18 UTC). Init-to-availability on
+# Open-Meteo ranges from 3.8 h (ICON) to 8.1 h (GFS 0.25, ECMWF IFS) and 9.5 h
+# (JMA); best_match may use any of them, so a run counts as published 10 h after
+# its start (scripts/check_publication_delay.py). A weather value is used only if
+# the run that produced it was published by the issue time; for the 17/23/05/11 UTC
+# issues every run used started at least 11 h before issue.
+RUN_CYCLE_HOURS = 6
+PUBLICATION_DELAY_HOURS = 10
 
 HORIZON_HOURS = 48

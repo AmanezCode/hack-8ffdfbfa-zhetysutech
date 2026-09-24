@@ -4,9 +4,12 @@ import pandas as pd
 from src.config import HORIZON_HOURS
 from src.data import utc_to_scada
 from src.physics import air_density, density_corrected_wind
-from src.weather import ENSEMBLE, weather_snapshot
+from src.weather import ENSEMBLE, SURFACE_ENSEMBLE, weather_snapshot
 
 ENSEMBLE_COLUMNS = [f"wind_{short}_fc" for short in ENSEMBLE.values()]
+SURFACE_COLUMNS = [f"wind10_{short}_fc" for short in SURFACE_ENSEMBLE.values()]
+
+INTERVAL_MEAN = True
 
 POWER_LAGS = [1, 2, 3, 6, 12, 24]
 WIND_LAGS = [1, 3, 6]
@@ -19,8 +22,9 @@ FEATURE_COLUMNS = [
     "wind_fc", "temp_fc", "air_density", "wind_corrected", "level1", "level1_mean3",
     "run_day", "lead_hours", "hour", "day_of_week", "month",
     "wind_fc_prev", "wind_fc_next", "wind_fc_mean3", "wind_fc_std3", "wind_fc_ramp",
-    # Three NWP models separately: where they disagree the blended forecast is least reliable.
+    # NWP models separately: where they disagree the blended forecast is least reliable.
     *[column.removesuffix("_fc") for column in ENSEMBLE_COLUMNS], "ens_mean", "ens_std", "ens_mean3", "level1_ens",
+    *[column.removesuffix("_fc") for column in SURFACE_COLUMNS], "ens10_mean", "ens10_std",
     "wind10", "gust", "shear", "wdir_sin", "wdir_cos", "pres", "rh",
 ]
 
@@ -48,6 +52,20 @@ def issue_state(history: pd.DataFrame, issue_time: pd.Timestamp) -> dict:
     return state
 
 
+def hour_means(snapshot: pd.DataFrame) -> pd.DataFrame:
+    """Weather per SCADA hour from a snapshot that runs one hour past the last hour needed.
+
+    The SCADA hour stamped H averages H:00..H:50 while NWP values are instantaneous,
+    so hour H is represented by the mean of the values at H and H+1. The run day and
+    the wind direction stay those of hour H.
+    """
+    snapshot = snapshot.copy()
+    if INTERVAL_MEAN:
+        values = snapshot.columns.difference(["run_day", "wdir_fc"])
+        snapshot[values] = (snapshot[values] + snapshot[values].shift(-1)) / 2
+    return snapshot.iloc[:-1]
+
+
 def build_features(
     history: pd.DataFrame,
     weather: pd.DataFrame,
@@ -65,7 +83,7 @@ def build_features(
 
     # Neighbouring hours come from the same availability rule, so the centred
     # window never borrows a run published after issue_time.
-    snapshot = weather_snapshot(weather, issue_time, padded_times)
+    snapshot = hour_means(weather_snapshot(weather, issue_time, padded_times.append(padded_times[-1:] + pd.Timedelta(hours=1))))
     wind = snapshot["wind_fc"]
     corrected = pd.Series(density_corrected_wind(wind, snapshot["temp_fc"]), index=padded_times)
 
@@ -99,6 +117,11 @@ def build_features(
     frame["wc_ens"] = pd.Series(density_corrected_wind(ens_mean, snapshot["temp_fc"]), index=padded_times).reindex(target_times)
 
     frame["wind10"] = snapshot["wind10_fc"].reindex(target_times)
+    surface = snapshot[["wind10_fc", *SURFACE_COLUMNS]].reindex(target_times)
+    for column in SURFACE_COLUMNS:
+        frame[column.removesuffix("_fc")] = surface[column]
+    frame["ens10_mean"] = surface.mean(axis=1)
+    frame["ens10_std"] = surface.std(axis=1)
     frame["gust"] = snapshot["gust_fc"].reindex(target_times)
     frame["shear"] = frame["wind_fc"] / np.maximum(frame["wind10"], 0.5)
     direction = np.deg2rad(snapshot["wdir_fc"].reindex(target_times))
