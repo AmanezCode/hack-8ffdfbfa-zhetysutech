@@ -6,11 +6,15 @@ time N*24..N*24+23 h). The plain Historical Forecast API is not used: it
 stitches the first hours of successive runs, so a 48 h forecast built from it
 would contain runs published after the issue time.
 
-Besides the blended ``best_match`` series (wind, temperature and a few extra
-variables) the archive holds 100 m wind from four NWP models separately (ECMWF
-IFS, ECMWF AIFS, GFS, ICON) and 10 m wind from three more (UK Met Office, CMA,
-JMA): their disagreement is a strong signal of forecast error. All of them
-publish within 10 h of initialisation, inside the availability rule.
+The core series (wind, temperature and a few extra variables) comes from one
+model, ICON, over the whole history. Open-Meteo's blended ``best_match`` is not
+used for it: here it equals ICON until 2025-09-30 and ECMWF IFS 9 km from
+2025-10-01, so a model trained on it would be scored and used on a different
+model than it learned from. The archive also holds 100 m wind from four more
+models (ECMWF IFS 0.25, ECMWF IFS 9 km, ECMWF AIFS, GFS) and 10 m wind from three
+(UK Met Office, CMA, JMA): their disagreement is a strong signal of forecast
+error. All of them publish within 10 h of initialisation, inside the
+availability rule.
 """
 
 import gzip
@@ -28,12 +32,13 @@ ENDPOINT = "https://previous-runs-api.open-meteo.com/v1/forecast"
 CORE = {"wind_speed_100m": "wind", "temperature_2m": "temp"}
 EXTRA = {"wind_speed_10m": "wind10", "wind_gusts_10m": "gust", "wind_direction_100m": "wdir",
          "surface_pressure": "pres", "relative_humidity_2m": "rh"}
-ENSEMBLE = {"ecmwf_ifs025": "ecmwf", "gfs_seamless": "gfs", "icon_seamless": "icon", "ecmwf_aifs025_single": "aifs"}
+CORE_MODEL = "icon_seamless"
+ENSEMBLE = {"ecmwf_ifs025": "ecmwf", "ecmwf_ifs": "ifs9", "gfs_seamless": "gfs", "ecmwf_aifs025_single": "aifs"}
 ENSEMBLE_VARIABLE = "wind_speed_100m"
 # Models without 100 m wind in the archive contribute their 10 m wind.
 SURFACE_ENSEMBLE = {"ukmo_seamless": "ukmo", "cma_grapes_global": "cma", "jma_seamless": "jma"}
 SURFACE_VARIABLE = "wind_speed_10m"
-CACHE_VERSION = "v3"
+CACHE_VERSION = "v4"
 
 
 def day_column(base: str, day: int, model: str = "") -> str:
@@ -58,7 +63,7 @@ def fetch_previous_runs(lat: float, lon: float, start_date: str, end_date: str) 
               "wind_speed_unit": "ms", "timezone": "GMT"}
     core_columns = [c for base in CORE for c in _day_columns(base, with_day0=True)]
     extra_columns = [c for base in EXTRA for c in _day_columns(base)]
-    params = common | {"hourly": ",".join(core_columns + extra_columns)}
+    params = common | {"hourly": ",".join(core_columns + extra_columns), "models": CORE_MODEL}
     frame, payload, content = _get(params)
     digest = hashlib.sha256(content)
 
@@ -81,6 +86,7 @@ def fetch_previous_runs(lat: float, lon: float, start_date: str, end_date: str) 
         "grid_longitude": payload["longitude"],
         "grid_elevation": payload["elevation"],
         "units": payload["hourly_units"],
+        "core_model": CORE_MODEL,
         "ensemble": ensemble_meta,
         "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "sha256": digest.hexdigest(),
@@ -150,12 +156,12 @@ def _stack(rows: pd.DataFrame, base: str, model: str = "") -> np.ndarray:
 def weather_snapshot(weather: pd.DataFrame, issue_time: pd.Timestamp, times: pd.DatetimeIndex) -> pd.DataFrame:
     """Weather for ``times`` exactly as it could be known at ``issue_time``.
 
-    The core series (best_match wind and temperature) picks the freshest
-    admissible run per hour; if that run is missing in the archive it falls back
-    to an older one (published even earlier, so still admissible). Extra
-    variables and the per-model winds are read from the same run and stay NaN
-    where that run lacks them. ``run_day`` records which run was used; hours with
-    no admissible core run stay NaN.
+    The core series (ICON wind and temperature) picks the freshest admissible
+    run per hour; if that run is missing in the archive it falls back to an older
+    one (published even earlier, so still admissible). Extra variables and the
+    per-model winds are read from the same run and stay NaN where that run lacks
+    them. ``run_day`` records which run was used; hours with no admissible core
+    run stay NaN.
     """
     lead = (times - issue_time) / pd.Timedelta(hours=1)
     required = run_day_for_lead(lead, issue_time)
