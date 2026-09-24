@@ -2,16 +2,17 @@
   "provider": "open-meteo",
   "endpoint": "https://previous-runs-api.open-meteo.com/v1/forecast",
   "params": {
-    "latitude": 43.64515,
-    "longitude": 78.535604,
+    "latitude": 43.643198,
+    "longitude": 78.538828,
     "start_date": "2023-03-11",
     "end_date": "2026-03-02",
     "wind_speed_unit": "ms",
     "timezone": "GMT",
-    "hourly": "wind_speed_100m,wind_speed_100m_previous_day1,wind_speed_100m_previous_day2,wind_speed_100m_previous_day3,temperature_2m,temperature_2m_previous_day1,temperature_2m_previous_day2,temperature_2m_previous_day3,wind_speed_10m_previous_day1,wind_speed_10m_previous_day2,wind_speed_10m_previous_day3,wind_gusts_10m_previous_day1,wind_gusts_10m_previous_day2,wind_gusts_10m_previous_day3,wind_direction_100m_previous_day1,wind_direction_100m_previous_day2,wind_direction_100m_previous_day3,surface_pressure_previous_day1,surface_pressure_previous_day2,surface_pressure_previous_day3,relative_humidity_2m_previous_day1,relative_humidity_2m_previous_day2,relative_humidity_2m_previous_day3"
+    "hourly": "wind_speed_100m,wind_speed_100m_previous_day1,wind_speed_100m_previous_day2,wind_speed_100m_previous_day3,temperature_2m,temperature_2m_previous_day1,temperature_2m_previous_day2,temperature_2m_previous_day3,wind_speed_10m_previous_day1,wind_speed_10m_previous_day2,wind_speed_10m_previous_day3,wind_gusts_10m_previous_day1,wind_gusts_10m_previous_day2,wind_gusts_10m_previous_day3,wind_direction_100m_previous_day1,wind_direction_100m_previous_day2,wind_direction_100m_previous_day3,surface_pressure_previous_day1,surface_pressure_previous_day2,surface_pressure_previous_day3,relative_humidity_2m_previous_day1,relative_humidity_2m_previous_day2,relative_humidity_2m_previous_day3",
+    "models": "icon_seamless"
   },
-  "grid_latitude": 43.620384,
-  "grid_longitude": 78.47891,
+  "grid_latitude": 43.625,
+  "grid_longitude": 78.5,
   "grid_elevation": 555.0,
   "units": {
     "time": "iso8601",
@@ -39,6 +40,7 @@
     "relative_humidity_2m_previous_day2": "%",
     "relative_humidity_2m_previous_day3": "%"
   },
+  "core_model": "icon_seamless",
   "ensemble": {
     "ecmwf": {
       "model": "ecmwf_ifs025",
@@ -46,7 +48,15 @@
         43.75,
         78.5
       ],
-      "sha256": "29f4c76adb536781c9d11d15e990fe276ad10c3b71b001d5d03e86a0954c183b"
+      "sha256": "813231a47ff216110a9a2a0f0eeb5e5094b3e601d06b27e8dbd6faa11dfc7f1a"
+    },
+    "ifs9": {
+      "model": "ecmwf_ifs",
+      "grid": [
+        43.620384,
+        78.47891
+      ],
+      "sha256": "db1f73911e3d9c6150542ff25f2ea398847e75060f8bfaa147bee8b237de2bb3"
     },
     "gfs": {
       "model": "gfs_seamless",
@@ -54,15 +64,7 @@
         43.638138,
         78.515625
       ],
-      "sha256": "d261fe16e1b4d7fabddf57d6a3ad71566fd5fef50864fa99259a2f07d09b3749"
-    },
-    "icon": {
-      "model": "icon_seamless",
-      "grid": [
-        43.625,
-        78.5
-      ],
-      "sha256": "b5edd7db8f70c39f829db0f546110e6289082ed2f4b148f8ff5449da0ee127e4"
+      "sha256": "85b8054b2cc877cdb2cb86535a17e5e659a6516354bcfc777736b02aa5e6af03"
     },
     "aifs": {
       "model": "ecmwf_aifs025_single",
@@ -70,7 +72,7 @@
         43.75,
         78.5
       ],
-      "sha256": "37c98f988c1282a0e6d35884f5ed49b422c258545207120d718e702140c14587"
+      "sha256": "ca5ca2e91947cff2a6eef9acf80012986e52d8a4bfea7652897deb5c9f7a5eb4"
     },
     "ukmo": {
       "model": "ukmo_seamless",
@@ -78,7 +80,7 @@
         43.6875,
         78.46875
       ],
-      "sha256": "3a70382736e0202daa081e59562717c283c2eac703676cb893cde2f72abea301"
+      "sha256": "d9de58d8ea1f9a7cbddd5fbf96bb5432cc6bd38ed6edb941b7db1f777846f6a9"
     },
     "cma": {
       "model": "cma_grapes_global",
@@ -86,7 +88,7 @@
         43.6875,
         78.5
       ],
-      "sha256": "e7427af03dbafe752aee47d74e2a2f01e50379e26f62d14a465171a2a6fbf1e1"
+      "sha256": "7aa22222a8feca4c7b8c0efbf3ab1cdd00463d6256d1d91068bf19e163564f40"
     },
     "jma": {
       "model": "jma_seamless",
@@ -94,9 +96,9 @@
         43.5,
         78.5
       ],
-      "sha256": "977737b2231dcf7efe9a01e995feebc8ccb03e8ced2f82d3e947a7ef231ff550"
+      "sha256": "005382f2c8d4d87d5cf1f9e3a7cc50238b104461adbdabaf9916c87f6afdd47c"
     }
   },
-  "retrieved_at": "2026-09-24T20:15:51+00:00",
-  "sha256": "7be09cc01ace197a15f1e17e2eca615f029584e0ac6ba27239e149520f8ef131"
+  "retrieved_at": "2026-09-24T21:38:13+00:00",
+  "sha256": "53e8bd7d1192832fbee36f78b0ac1a961876803c89893ff17cd0dac823f83657"
 }
