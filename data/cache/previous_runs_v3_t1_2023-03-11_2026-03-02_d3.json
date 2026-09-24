@@ -1,0 +1,102 @@
+{
+  "provider": "open-meteo",
+  "endpoint": "https://previous-runs-api.open-meteo.com/v1/forecast",
+  "params": {
+    "latitude": 43.64515,
+    "longitude": 78.535604,
+    "start_date": "2023-03-11",
+    "end_date": "2026-03-02",
+    "wind_speed_unit": "ms",
+    "timezone": "GMT",
+    "hourly": "wind_speed_100m,wind_speed_100m_previous_day1,wind_speed_100m_previous_day2,wind_speed_100m_previous_day3,temperature_2m,temperature_2m_previous_day1,temperature_2m_previous_day2,temperature_2m_previous_day3,wind_speed_10m_previous_day1,wind_speed_10m_previous_day2,wind_speed_10m_previous_day3,wind_gusts_10m_previous_day1,wind_gusts_10m_previous_day2,wind_gusts_10m_previous_day3,wind_direction_100m_previous_day1,wind_direction_100m_previous_day2,wind_direction_100m_previous_day3,surface_pressure_previous_day1,surface_pressure_previous_day2,surface_pressure_previous_day3,relative_humidity_2m_previous_day1,relative_humidity_2m_previous_day2,relative_humidity_2m_previous_day3"
+  },
+  "grid_latitude": 43.620384,
+  "grid_longitude": 78.47891,
+  "grid_elevation": 555.0,
+  "units": {
+    "time": "iso8601",
+    "wind_speed_100m": "m/s",
+    "wind_speed_100m_previous_day1": "m/s",
+    "wind_speed_100m_previous_day2": "m/s",
+    "wind_speed_100m_previous_day3": "m/s",
+    "temperature_2m": "\u00b0C",
+    "temperature_2m_previous_day1": "\u00b0C",
+    "temperature_2m_previous_day2": "\u00b0C",
+    "temperature_2m_previous_day3": "\u00b0C",
+    "wind_speed_10m_previous_day1": "m/s",
+    "wind_speed_10m_previous_day2": "m/s",
+    "wind_speed_10m_previous_day3": "m/s",
+    "wind_gusts_10m_previous_day1": "m/s",
+    "wind_gusts_10m_previous_day2": "m/s",
+    "wind_gusts_10m_previous_day3": "m/s",
+    "wind_direction_100m_previous_day1": "\u00b0",
+    "wind_direction_100m_previous_day2": "\u00b0",
+    "wind_direction_100m_previous_day3": "\u00b0",
+    "surface_pressure_previous_day1": "hPa",
+    "surface_pressure_previous_day2": "hPa",
+    "surface_pressure_previous_day3": "hPa",
+    "relative_humidity_2m_previous_day1": "%",
+    "relative_humidity_2m_previous_day2": "%",
+    "relative_humidity_2m_previous_day3": "%"
+  },
+  "ensemble": {
+    "ecmwf": {
+      "model": "ecmwf_ifs025",
+      "grid": [
+        43.75,
+        78.5
+      ],
+      "sha256": "29f4c76adb536781c9d11d15e990fe276ad10c3b71b001d5d03e86a0954c183b"
+    },
+    "gfs": {
+      "model": "gfs_seamless",
+      "grid": [
+        43.638138,
+        78.515625
+      ],
+      "sha256": "d261fe16e1b4d7fabddf57d6a3ad71566fd5fef50864fa99259a2f07d09b3749"
+    },
+    "icon": {
+      "model": "icon_seamless",
+      "grid": [
+        43.625,
+        78.5
+      ],
+      "sha256": "b5edd7db8f70c39f829db0f546110e6289082ed2f4b148f8ff5449da0ee127e4"
+    },
+    "aifs": {
+      "model": "ecmwf_aifs025_single",
+      "grid": [
+        43.75,
+        78.5
+      ],
+      "sha256": "37c98f988c1282a0e6d35884f5ed49b422c258545207120d718e702140c14587"
+    },
+    "ukmo": {
+      "model": "ukmo_seamless",
+      "grid": [
+        43.6875,
+        78.46875
+      ],
+      "sha256": "3a70382736e0202daa081e59562717c283c2eac703676cb893cde2f72abea301"
+    },
+    "cma": {
+      "model": "cma_grapes_global",
+      "grid": [
+        43.6875,
+        78.5
+      ],
+      "sha256": "e7427af03dbafe752aee47d74e2a2f01e50379e26f62d14a465171a2a6fbf1e1"
+    },
+    "jma": {
+      "model": "jma_seamless",
+      "grid": [
+        43.5,
+        78.5
+      ],
+      "sha256": "977737b2231dcf7efe9a01e995feebc8ccb03e8ced2f82d3e947a7ef231ff550"
+    }
+  },
+  "retrieved_at": "2026-09-24T20:15:51+00:00",
+  "sha256": "7be09cc01ace197a15f1e17e2eca615f029584e0ac6ba27239e149520f8ef131"
+}

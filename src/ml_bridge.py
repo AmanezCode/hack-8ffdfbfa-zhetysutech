@@ -8,7 +8,7 @@ import pandas as pd
 from src import model
 from src.config import ARTIFACTS, PUBLICATION_DELAY_HOURS, TURBINES
 from src.data import load_turbine_hourly
-from src.features import FEATURE_COLUMNS
+from src.features import FEATURE_COLUMNS, hour_means
 from src.weather import fetch_previous_runs, load_weather, weather_snapshot, weather_provenance
 
 
@@ -34,7 +34,9 @@ def load_team_weather(lat: float, lon: float, issue_time: pd.Timestamp, *, refre
     """
     turbine_id = turbine_for(lat, lon)
     issue = issue_time.tz_convert("UTC").tz_localize(None)
-    times = pd.date_range(issue, periods=50, freq="h")
+    # issue .. issue+50 h: the model reads one hour on each side of the 48 h horizon, plus one
+    # more for the hour-interval means.
+    times = pd.date_range(issue, periods=51, freq="h")
     archive = load_weather(turbine_id)
     live_meta = None
     if refresh:
@@ -44,7 +46,8 @@ def load_team_weather(lat: float, lon: float, issue_time: pd.Timestamp, *, refre
         archive = live.combine_first(archive)
     archive = archive.reindex(times)
 
-    snapshot = weather_snapshot(archive, issue, times[1:-1])
+    # The same per-hour weather the model reads, so the agent validates what the model uses.
+    snapshot = hour_means(weather_snapshot(archive, issue, times[1:50]))
     missing = snapshot.index[snapshot[["wind_fc", "temp_fc"]].isna().any(axis=1)]
     if len(missing):
         raise model.IncompleteWeatherError(missing)
@@ -55,7 +58,7 @@ def load_team_weather(lat: float, lon: float, issue_time: pd.Timestamp, *, refre
     provenance = weather_provenance(turbine_id)
     frame.attrs.update(source="Open-Meteo Previous Runs", provenance=provenance,
                        publication_delay_hours=PUBLICATION_DELAY_HOURS,
-                       availability_rule="run_day * 24 >= lead_hours + publication_delay_hours",
+                       availability_rule="run behind previous_dayN (latest 6-hourly start <= valid time - N*24 h) public by issue time",
                        publication_delay_is_historical_assumption=True,
                        run_day=frame["run_day"].astype(int).tolist(),
                        _team_archive=archive, turbine_id=turbine_id)
@@ -91,10 +94,13 @@ def run_team_model(turbine_id: int, issue_time: pd.Timestamp, weather: pd.DataFr
         raise ValueError("Model manifest turbine mismatch")
     if artifacts["variant"] != "physics" and artifacts.get("booster") is None:
         raise ValueError("Selected ML variant requires booster_tN.txt")
-    if artifacts.get("booster") is not None:
-        if artifacts["booster"].feature_name() != FEATURE_COLUMNS:
-            raise ValueError("Booster feature order differs from current ML schema")
-        artifacts["booster"].params["num_threads"] = 1
+    if artifacts["variant"] == "combined" and (artifacts.get("wind_model") is None or artifacts.get("anemometer_curve") is None):
+        raise ValueError("Combined variant requires booster_wind_tN.txt and the anemometer power curve")
+    for name in ("booster", "wind_model"):
+        if artifacts.get(name) is not None:
+            if artifacts[name].feature_name() != FEATURE_COLUMNS:
+                raise ValueError(f"{name} feature order differs from current ML schema")
+            artifacts[name].set_threads(1)
     issue = issue_time.tz_convert("UTC").tz_localize(None)
     if pd.Timestamp(manifest["train_target_end"]) + pd.Timedelta(hours=1) > issue:
         raise ValueError("Model trained on labels unavailable at issue_time")
